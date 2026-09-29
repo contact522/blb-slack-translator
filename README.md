@@ -25,7 +25,19 @@ YWH Slack 워크스페이스에서 메시지 ⋯ → **번역 / Translate** → 
 3. "스레드 문맥 참고"를 켜면 같은 스레드의 앞선 메시지(최대 5개, 2000자)를 뜻 파악에만 씁니다. 권한이 없거나 스레드가 아니면 그 사실을 표시하고 이 메시지만 번역합니다.
 4. `PAID_API_ENABLED=false`(기본)면 외부 번역 호출 없이 "미리보기" 안내만 보입니다. UI 시험용입니다.
 
-## 처음 실행 (Windows, Node.js 22 이상)
+## 가장 쉬운 실행 (Windows)
+
+1. GitHub 저장소 → Code → Download ZIP → 압축 풀기
+2. 폴더 안 `start-windows.bat` 더블클릭
+3. 처음 한 번만: 자동으로 열리는 Slack 설정 페이지에서 토큰 두 개를 복사해 창에 붙여넣기 (화면에 안 보임, `.env` 에만 저장)
+4. `SLACK_SOCKET_CONNECTED` 가 보이면 Slack 메시지 ⋯ → 번역 / Translate
+
+다음부터는 `start-windows.bat` 더블클릭만 하면 됩니다. 창을 닫으면 번역도 멈춥니다.
+예전 Codex 폴더의 번역기가 켜져 있으면 먼저 끄세요. 같은 앱에 두 프로그램이 연결되면 요청이 둘 중 하나로 나뉩니다.
+`start-windows.bat` 은 이 스크립트 한 번에 한해 PowerShell 실행 정책을 우회(`-ExecutionPolicy Bypass`)합니다. 시스템 설정은 바꾸지 않습니다.
+(이 스크립트는 Windows 에서 실행해 보지 못했습니다. 오류가 나면 문구를 알려 주세요.)
+
+## 수동 실행 (Windows, Node.js 22 이상)
 
 1. **앱 토큰 확인/발급** — https://api.slack.com/apps/A0C4PUE07ST/general → App-Level Tokens.
    이미 `blb-translator-local` 이 있으면 새로 만들지 말고 그것을 씁니다. 없으면 scope `connections:write` **하나만** 넣어 발급합니다.
@@ -67,5 +79,6 @@ PC 를 끄거나 창을 닫으면 번역도 멈춥니다. 상시 운영은 서�
 - `src/core.mjs` — 언어 목록, 문맥 선택, 프롬프트(입력·지시 분리), 메타데이터 3000자 제한, 호출 제한
 - `src/translator.mjs` — Gemini REST 호출 (키는 헤더로 전송)
 - `src/config.mjs` — 환경변수 검증 (오류 메시지에 비밀값 없음)
+- `start-windows.bat`, `scripts/start-windows.ps1` — Windows 설치·토큰 입력·실행
 
 로그에는 메시지 본문과 토큰을 남기지 않습니다.
