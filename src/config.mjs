@@ -33,6 +33,10 @@ export function loadConfig(env = process.env) {
     openaiModel: env.OPENAI_MODEL || 'gpt-6-luna',
     perUserPerMinute: int(env.RATE_LIMIT_PER_USER_PER_MINUTE, 10),
     perDay: int(env.RATE_LIMIT_PER_DAY, 500),
+    // 이 반응(이모지 이름)을 달면 번역한다. 마우스 올림 아이콘 줄에 넣어 두면 한 번 클릭.
+    reaction: env.TRANSLATE_REACTION || 'globe_with_meridians',
+    // 사람별 기본 언어 저장 위치. 서버에서는 Railway 볼륨(/data)에 둔다.
+    dataDir: env.DATA_DIR || 'data',
     healthHost: env.HEALTH_HOST || '127.0.0.1',
     healthPort: int(env.HEALTH_PORT, 3000),
   };

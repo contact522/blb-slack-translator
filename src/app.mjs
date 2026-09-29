@@ -5,6 +5,8 @@ import { loadConfig } from './config.mjs';
 import { createRateLimiter } from './core.mjs';
 import { createOpenAITranslator } from './translator.mjs';
 import { registerHandlers } from './handlers.mjs';
+import { createPrefStore } from './prefs.mjs';
+import path from 'node:path';
 
 const { App, LogLevel, webApi } = bolt;
 const config = loadConfig();
@@ -33,9 +35,12 @@ socket.on('disconnected', () => {
   console.log('SLACK_SOCKET_DISCONNECTED');
 });
 
+const prefs = createPrefStore(path.join(config.dataDir, 'prefs.json'));
+
 registerHandlers(app, {
   config,
   logger,
+  prefs,
   limiter: createRateLimiter({ perUserPerMinute: config.perUserPerMinute, perDay: config.perDay }),
   translate: config.paidApiEnabled
     ? createOpenAITranslator({ apiKey: config.openaiApiKey, model: config.openaiModel })
@@ -57,6 +62,7 @@ const health = http.createServer((req, res) => {
     transport: 'socket',
     socketConnected: state.socketConnected,
     paidApiEnabled: config.paidApiEnabled,
+    usersWithLanguage: prefs.size(),
     uptimeSec: Math.round((Date.now() - state.startedAt) / 1000),
   }));
 });

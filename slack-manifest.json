@@ -12,13 +12,19 @@
         "name": "번역 / Translate",
         "type": "message",
         "callback_id": "translate_message",
-        "description": "이 메시지를 선택한 언어로 번역해 나에게만 보여 줍니다"
+        "description": "이 메시지를 내 언어로 번역해 나에게만 보여 줍니다"
       }
     ]
   },
   "oauth_config": {
     "scopes": {
-      "bot": ["commands"]
+      "bot": [
+        "commands",
+        "chat:write",
+        "reactions:read",
+        "channels:history",
+        "groups:history"
+      ]
     }
   },
   "settings": {
@@ -27,6 +33,11 @@
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
-    "token_rotation_enabled": false
+    "token_rotation_enabled": false,
+    "event_subscriptions": {
+      "bot_events": [
+        "reaction_added"
+      ]
+    }
   }
 }
