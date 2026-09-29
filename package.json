@@ -4,7 +4,7 @@
   "description": "BLB Translator — Slack 메시지 메뉴 → 개인 모달 번역",
   "main": "src/app.mjs",
   "scripts": {
-    "start": "node --env-file=.env src/app.mjs",
+    "start": "node --env-file-if-exists=.env src/app.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "check": "node --check src/app.mjs"
   },
