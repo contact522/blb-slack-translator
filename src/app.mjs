@@ -6,6 +6,8 @@ import { createRateLimiter } from './core.mjs';
 import { createOpenAITranslator } from './translator.mjs';
 import { registerHandlers } from './handlers.mjs';
 import { createPrefStore } from './prefs.mjs';
+import { createUserTokenStore } from './userTokens.mjs';
+import { createOAuthRoutes } from './oauth.mjs';
 import path from 'node:path';
 
 const { App, LogLevel, webApi } = bolt;
@@ -37,34 +39,60 @@ socket.on('disconnected', () => {
 
 const prefs = createPrefStore(path.join(config.dataDir, 'prefs.json'));
 
+// DM 🌐 번역이 켜져 있으면 사용자 토큰 저장소와 연결(OAuth) 경로를 준비한다.
+let userTokens = null;
+let oauthHandle = null;
+if (config.dmEnabled) {
+  userTokens = createUserTokenStore({
+    file: path.join(config.dataDir, 'user-tokens.json'),
+    auditFile: path.join(config.dataDir, 'audit.log'),
+    keyHex: config.tokenKey,
+  });
+  oauthHandle = createOAuthRoutes({ config, userTokens, logger });
+}
+
 registerHandlers(app, {
   config,
   logger,
   prefs,
+  userTokens,
+  makeClient: (token) => new webApi.WebClient(token),
   limiter: createRateLimiter({ perUserPerMinute: config.perUserPerMinute, perDay: config.perDay }),
   translate: config.paidApiEnabled
     ? createOpenAITranslator({ apiKey: config.openaiApiKey, model: config.openaiModel })
     : null,
 });
 
+// 팀원이 계정을 나가거나 앱을 제거하면 그 사람 토큰을 즉시 지운다.
+app.event('tokens_revoked', async ({ event }) => {
+  for (const uid of event?.tokens?.oauth ?? []) userTokens?.delete(uid, 'app_removed');
+});
+app.event('user_change', async ({ event }) => {
+  if (event?.user?.deleted) userTokens?.delete(event.user.id, 'account_deactivated');
+});
+
 app.error(async (err) => {
   logger.error(`처리 중 오류: ${err.code ?? err.name}`);
 });
 
-const health = http.createServer((req, res) => {
-  if (req.url !== '/health') {
-    res.writeHead(404).end();
+const web = http.createServer(async (req, res) => {
+  // DM 연결(OAuth) 경로를 먼저 처리한다.
+  if (oauthHandle && await oauthHandle(req, res)) return;
+  if (req.url?.startsWith('/health')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      transport: 'socket',
+      socketConnected: state.socketConnected,
+      paidApiEnabled: config.paidApiEnabled,
+      dmEnabled: config.dmEnabled,
+      usersWithLanguage: prefs.size(),
+      usersConnectedForDm: userTokens?.size() ?? 0,
+      uptimeSec: Math.round((Date.now() - state.startedAt) / 1000),
+    }));
     return;
   }
-  res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({
-    ok: true,
-    transport: 'socket',
-    socketConnected: state.socketConnected,
-    paidApiEnabled: config.paidApiEnabled,
-    usersWithLanguage: prefs.size(),
-    uptimeSec: Math.round((Date.now() - state.startedAt) / 1000),
-  }));
+  res.writeHead(404).end();
 });
 
 async function main() {
@@ -76,15 +104,19 @@ async function main() {
     console.error(`[config] 봇 토큰의 워크스페이스(${auth.team_id})가 SLACK_TEAM_ID 와 다릅니다.`);
     process.exit(1);
   }
-  health.listen(config.healthPort, config.healthHost, () => {
-    console.log(`health: http://${config.healthHost}:${config.healthPort}/health`);
+  // DM 연결을 쓰면 OAuth 콜백을 밖에서 받아야 하므로 공개 포트(0.0.0.0:$PORT)로 연다.
+  // 안 쓰면 이 PC 에서만 접근 가능한 127.0.0.1 로 둔다.
+  const port = config.dmEnabled ? Number(process.env.PORT || config.healthPort) : config.healthPort;
+  const host = config.dmEnabled ? '0.0.0.0' : config.healthHost;
+  web.listen(port, host, () => {
+    console.log(`web: http://${host}:${port}/health${config.dmEnabled ? ` (DM 연결: ${config.installUrl})` : ''}`);
   });
   await app.start();
   console.log(`BLB Translator 시작 (유료 번역 API: ${config.paidApiEnabled ? `켜짐, ${config.openaiModel}` : '꺼짐'}). 종료: Ctrl+C`);
 }
 
 async function shutdown() {
-  health.close();
+  web.close();
   await app.stop().catch(() => {});
   process.exit(0);
 }

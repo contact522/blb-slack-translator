@@ -24,6 +24,12 @@
         "reactions:read",
         "channels:history",
         "groups:history"
+      ],
+      "user": [
+        "im:history",
+        "mpim:history",
+        "reactions:read",
+        "chat:write"
       ]
     }
   },
@@ -36,7 +42,9 @@
     "token_rotation_enabled": false,
     "event_subscriptions": {
       "bot_events": [
-        "reaction_added"
+        "reaction_added",
+        "tokens_revoked",
+        "user_change"
       ]
     }
   }

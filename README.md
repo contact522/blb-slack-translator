@@ -27,7 +27,17 @@ YWH Slack 워크스페이스에서 메시지 ⋯ → **번역 / Translate** → 
 5. 스레드 답글이면 같은 스레드 앞 메시지(최대 5개)를 뜻 파악에만 쓴다. 봇이 없는 곳은 이 메시지만 번역.
 6. 번역은 OpenAI `gpt-6-luna` 한 모델. 사람별 기본 언어는 `DATA_DIR/prefs.json`(서버는 Railway 볼륨 `/data`). 원문 기록은 메모리 24시간이라 재시작 후 옛 결과의 버튼은 「다시 번역해 주세요」로 안내.
 
-필요한 Bot scope: `commands`, `chat:write`, `reactions:read`, `channels:history`, `groups:history`. Event Subscriptions 에 `reaction_added`.
+### DM 에서도 🌐 한 번 클릭 (사용자 연결)
+
+DM·그룹DM 은 봇이 들어갈 수 없어, 본인이 한 번 「연결」하면 그때부터 본인 토큰으로 🌐 번역이 된다.
+- 연결 링크: `PUBLIC_URL/slack/install` → Slack 허락 → 본인 토큰을 서버에 **암호화(AES-256-GCM)** 저장. 해독 키(`TOKEN_KEY`)는 환경변수에만.
+- 사용자 스코프는 최소 4개: `im:history`, `mpim:history`, `reactions:read`, `chat:write`.
+- 🌐 를 누르면 그 메시지만 읽어 번역하고, **읽을 때마다 감사 기록**(`DATA_DIR/audit.log`, 누가·언제·어느 대화방, 본문 없음)을 남긴다.
+- 앱 제거(`tokens_revoked`)·계정 비활성화(`user_change`) 시 그 사람 토큰을 **즉시 삭제**한다.
+- 보안 주의: 연결한 사람의 토큰은 그 사람의 **DM 전체를 읽을 수 있는 권한**이다. 서버가 이 토큰의 보관처가 되므로, `TOKEN_KEY` 는 볼륨과 분리해 환경변수로만 두고, 팀원에게 「연결하면 회사 번역 서버가 내 DM 을 읽을 수 있다」고 안내할 것.
+- 이 5개 환경변수(`PUBLIC_URL`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `TOKEN_KEY`, `STATE_SECRET`)가 모두 있어야 DM 기능이 켜진다. 없으면 채널 🌐 와 ⋯→번역만 동작한다.
+
+필요한 Bot scope: `commands`, `chat:write`, `reactions:read`, `channels:history`, `groups:history`. Event Subscriptions 에 `reaction_added`, `tokens_revoked`, `user_change`. DM 을 켜면 User scope 4개(`im:history`, `mpim:history`, `reactions:read`, `chat:write`).
 
 ## 가장 쉬운 실행 (Windows)
 

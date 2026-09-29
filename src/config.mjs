@@ -18,10 +18,21 @@ export function loadConfig(env = process.env) {
   const paidApiEnabled = bool(env.PAID_API_ENABLED, false);
   const openaiApiKey = env.OPENAI_API_KEY ?? '';
 
+  // DM 🌐 번역(사용자 연결). 이 값들이 모두 있어야 켜진다. 없으면 채널 🌐 와 ⋯→번역만 동작한다.
+  const publicUrl = (env.PUBLIC_URL ?? '').replace(/\/$/, '');
+  const clientId = env.SLACK_CLIENT_ID ?? '';
+  const clientSecret = env.SLACK_CLIENT_SECRET ?? '';
+  const tokenKey = env.TOKEN_KEY ?? '';
+  const stateSecret = env.STATE_SECRET ?? '';
+  const dmEnabled = Boolean(publicUrl && clientId && clientSecret && stateSecret && /^[0-9a-fA-F]{64}$/.test(tokenKey));
+
   if (!botToken.startsWith('xoxb-')) errors.push('SLACK_BOT_TOKEN 이 없거나 xoxb- 로 시작하지 않습니다.');
   if (!appToken.startsWith('xapp-')) errors.push('SLACK_APP_TOKEN 이 없거나 xapp- 로 시작하지 않습니다.');
   if (!/^T[A-Z0-9]+$/.test(teamId)) errors.push('SLACK_TEAM_ID 가 없거나 형식이 맞지 않습니다.');
   if (paidApiEnabled && !openaiApiKey) errors.push('PAID_API_ENABLED=true 인데 OPENAI_API_KEY 가 없습니다.');
+  // DM 값이 일부만 있으면 설정 실수이므로 알린다(전부 없으면 그냥 DM 기능 꺼짐).
+  const anyDm = publicUrl || clientId || clientSecret || tokenKey || stateSecret;
+  if (anyDm && !dmEnabled) errors.push('DM 번역 설정이 일부만 있습니다. PUBLIC_URL·SLACK_CLIENT_ID·SLACK_CLIENT_SECRET·STATE_SECRET·TOKEN_KEY(64자리 16진수)를 모두 채우세요.');
 
   return {
     errors,
@@ -39,5 +50,13 @@ export function loadConfig(env = process.env) {
     dataDir: env.DATA_DIR || 'data',
     healthHost: env.HEALTH_HOST || '127.0.0.1',
     healthPort: int(env.HEALTH_PORT, 3000),
+    // DM 🌐 번역(사용자 연결)
+    dmEnabled,
+    publicUrl,
+    clientId,
+    clientSecret,
+    tokenKey,
+    stateSecret,
+    installUrl: dmEnabled ? `${publicUrl}/slack/install` : '',
   };
 }

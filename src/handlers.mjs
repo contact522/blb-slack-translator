@@ -44,7 +44,23 @@ async function postJson(url, payload) {
   if (!res.ok) throw new Error(`response_url ${res.status}`);
 }
 
-export function registerHandlers(app, { config, translate, limiter, logger, prefs, respond = postJson, now = () => Date.now() }) {
+// 연결 안 한 사람이 DM 에서 🌐 를 눌렀을 때 보내는 안내.
+function connectPrompt(installUrl) {
+  return {
+    text: 'DM 번역을 켜려면 한 번 연결해 주세요 / Connect once to translate in DMs',
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: 'DM 에서 🌐 번역을 쓰려면 한 번만 연결해 주세요. 연결하면 이 앱이 회사 번역을 위해 내 DM 메시지를 읽을 수 있습니다.\nConnect once to use 🌐 translation in DMs. This lets the app read your DM messages for translation.' } },
+      { type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: '🔗 연결 / Connect' }, url: installUrl }] },
+    ],
+  };
+}
+
+export function registerHandlers(app, {
+  config, translate, limiter, logger, prefs,
+  userTokens = null,
+  makeClient = (token) => new (app.client.constructor)(token),
+  respond = postJson, now = () => Date.now(),
+}) {
   // 원문 기록. 버튼(다른 언어로 보기 등)을 누를 때 원문이 다시 필요하다. 메모리 보관이라 재시작하면 사라진다.
   const sources = new Map();
 
@@ -175,26 +191,51 @@ export function registerHandlers(app, { config, translate, limiter, logger, pref
     await start(client, { userId: body.user.id, entry, triggerId: body.trigger_id });
   });
 
-  // 🌐 반응. 봇이 들어가 있는 대화방의 이벤트만 온다.
+  // 반응한 메시지 하나를 읽는다. 봇 토큰(채널)과 사용자 토큰(DM) 양쪽에서 쓴다.
+  async function readReactedMessage(reader, channel, ts) {
+    const res = await reader.conversations.history({ channel, latest: ts, inclusive: true, limit: 1 });
+    let message = res.messages?.find((m) => m.ts === ts);
+    if (!message) {
+      // 스레드 답글은 history 에 없다. replies 로 찾는다.
+      const r = await reader.conversations.replies({ channel, ts, limit: 1 });
+      message = r.messages?.find((m) => m.ts === ts);
+    }
+    return message ?? null;
+  }
+
+  // 🌐 반응.
+  // - 채널: 봇이 참여한 곳의 이벤트만 온다. 봇 토큰으로 읽고 봇으로 나에게만 보낸다.
+  // - DM/그룹DM: 반응한 본인이 연결(userTokens)돼 있으면 그 사람 토큰으로 읽고 그 사람으로서 나에게만 보낸다.
   app.event('reaction_added', async ({ event, body, client }) => {
     if (!sameTeam(body?.team_id)) return;
     if (event.reaction !== config.reaction || event.item?.type !== 'message') return;
     const { channel, ts } = event.item;
+    const isDm = channel.startsWith('D'); // D=DM/그룹DM 채널 id 접두. 채널은 C/G.
+
+    // 본인 토큰이 있으면 그것으로(특히 DM). 없으면 봇 토큰으로(채널).
+    const userToken = userTokens?.get(event.user) ?? null;
+    const reader = userToken ? makeClient(userToken) : client;
+
     let message;
     try {
-      const res = await client.conversations.history({ channel, latest: ts, inclusive: true, limit: 1 });
-      message = res.messages?.find((m) => m.ts === ts);
-      if (!message) {
-        // 스레드 답글은 history 에 없다. replies 로 찾는다.
-        const r = await client.conversations.replies({ channel, ts, limit: 1 });
-        message = r.messages?.find((m) => m.ts === ts);
-      }
+      message = await readReactedMessage(reader, channel, ts);
     } catch (err) {
-      logger.warn(`반응한 메시지를 읽지 못함: ${err?.data?.error ?? err.message}`);
+      const code = err?.data?.error ?? err.message;
+      // DM 인데 본인이 연결 안 했으면 연결 링크를 안내한다(봇 토큰으로 보냄).
+      if (isDm && !userToken && config.installUrl) {
+        await deliver(client, { channel, ts, threadTs: null }, event.user, connectPrompt(config.installUrl))
+          .catch(() => {});
+        return;
+      }
+      logger.warn(`반응한 메시지를 읽지 못함: ${code}`);
       return;
     }
     if (!message) return;
-    await start(client, { userId: event.user, entry: makeEntry({ channel, message }) });
+
+    if (userToken) userTokens.record(event.user, isDm ? 'dm' : 'channel', channel);
+    const entry = makeEntry({ channel, message });
+    // DM 은 본인 토큰으로 본인으로서 결과를 보낸다.
+    await start(userToken ? makeClient(userToken) : client, { userId: event.user, entry });
   });
 
   app.action(ACTION_RETRANSLATE, async ({ ack, body, action, client }) => {

@@ -7,11 +7,13 @@ import { registerHandlers, loadContext, SHORTCUT_ID } from '../src/handlers.mjs'
 import { PREF_CALLBACK_ID, ACTION_RETRANSLATE, ACTION_CHANGE_DEFAULT } from '../src/views.mjs';
 import { createRateLimiter } from '../src/core.mjs';
 import { createMemoryPrefStore, createPrefStore } from '../src/prefs.mjs';
+import { createMemoryUserTokenStore } from '../src/userTokens.mjs';
 
 function fakeApp() {
   const handlers = {};
   return {
     handlers,
+    client: { constructor: class {} },
     shortcut: (id, fn) => { handlers[`shortcut:${id}`] = fn; },
     action: (id, fn) => { handlers[`action:${id}`] = fn; },
     view: (id, fn) => { handlers[`view:${id}`] = fn; },
@@ -19,10 +21,11 @@ function fakeApp() {
   };
 }
 
-function fakeClient({ replies, history, ephemeralError } = {}) {
+function fakeClient({ replies, history, ephemeralError, historyError, tag } = {}) {
   const calls = [];
   return {
     calls,
+    tag,
     views: { open: async (a) => { calls.push(['open', a]); } },
     chat: {
       postEphemeral: async (a) => {
@@ -36,7 +39,11 @@ function fakeClient({ replies, history, ephemeralError } = {}) {
         if (replies instanceof Error) throw replies;
         return { messages: replies ?? [] };
       },
-      history: async (a) => { calls.push(['history', a]); return { messages: history ?? [] }; },
+      history: async (a) => {
+        calls.push(['history', a]);
+        if (historyError) throw Object.assign(new Error('x'), { data: { error: historyError } });
+        return { messages: history ?? [] };
+      },
     },
   };
 }
@@ -44,7 +51,7 @@ function fakeClient({ replies, history, ephemeralError } = {}) {
 const logger = { info() {}, warn() {}, error() {} };
 const baseConfig = { teamId: 'T1', paidApiEnabled: true, reaction: 'globe_with_meridians' };
 
-function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore() } = {}) {
+function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore(), userTokens = null, userClients = {} } = {}) {
   const app = fakeApp();
   const responded = [];
   registerHandlers(app, {
@@ -53,6 +60,8 @@ function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`,
     limiter: createRateLimiter({ perUserPerMinute: 5, perDay: 100 }),
     logger,
     prefs,
+    userTokens,
+    makeClient: (token) => userClients[token],
     respond: async (url, payload) => { responded.push({ url, payload }); },
   });
   return { app, prefs, responded };
@@ -220,4 +229,55 @@ test('기본 언어는 파일에 저장되어 다시 켜도 남는다', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'prefs-')), 'sub', 'prefs.json');
   createPrefStore(file).set('U1', 'vi');
   assert.equal(createPrefStore(file).get('U1'), 'vi');
+});
+
+// --- DM 🌐 번역 (사용자 연결) ---
+
+const dmReaction = (app, client, user = 'U1', channel = 'D9', ts = '5.0') =>
+  app.handlers['event:reaction_added']({
+    body: { team_id: 'T1' },
+    event: { reaction: 'globe_with_meridians', user, item: { type: 'message', channel, ts } },
+    client,
+  });
+
+test('DM 에서 연결된 사람은 본인 토큰으로 읽고 본인으로서 나에게만 보낸다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ history: [{ ts: '5.0', text: 'สวัสดี' }], tag: 'user' });
+  const botClient = fakeClient({ historyError: 'not_in_channel', tag: 'bot' }); // 봇은 DM 을 못 읽는다
+  const { app, prefs } = setup({ userTokens, userClients: { 'xoxp-u1': userClient } });
+  prefs.set('U1', 'ko');
+
+  await dmReaction(app, botClient);
+
+  // 봇 클라이언트로는 메시지를 읽지도, 보내지도 않았다
+  assert.equal(botClient.calls.some((c) => c[0] === 'ephemeral'), false);
+  // 사용자 토큰 클라이언트로 읽고 보냈다
+  assert.ok(userClient.calls.some((c) => c[0] === 'history'));
+  const eph = userClient.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.equal(eph.channel, 'D9');
+  assert.equal(eph.user, 'U1');
+  assert.match(text(eph), /번역-ko/);
+});
+
+test('DM 에서 연결 안 한 사람에게는 연결 링크를 안내한다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  const botClient = fakeClient({ historyError: 'not_in_channel' });
+  const { app } = setup({ userTokens, config: { installUrl: 'https://x.app/slack/install' } });
+
+  await dmReaction(app, botClient, 'U404');
+  const eph = botClient.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.equal(eph.user, 'U404');
+  const btn = eph.blocks.find((b) => b.type === 'actions').elements[0];
+  assert.equal(btn.url, 'https://x.app/slack/install');
+});
+
+test('DM 읽기는 감사 기록을 남긴다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ history: [{ ts: '5.0', text: 'hi' }] });
+  const { app, prefs } = setup({ userTokens, userClients: { 'xoxp-u1': userClient } });
+  prefs.set('U1', 'ko');
+  await dmReaction(app, fakeClient({ historyError: 'not_in_channel' }));
+  assert.ok(userTokens.log.some((l) => l.startsWith('read U1 dm D9')));
 });
