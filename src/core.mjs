@@ -63,6 +63,11 @@ export function buildTranslationPrompt({ text, targetCode, context = [] }) {
     '- Keep Slack tokens unchanged: <@U…>, <#C…>, <!here>, <https://…|label> (you may translate the label), :emoji:, `code` and ``` blocks.',
     '- Keep line breaks, lists, numbers, dates, amounts, product names and URLs as they are.',
     `- If the message is already in ${lang.promptName}, return it unchanged.`,
+    '- The message may contain typos or fast-typing slips. Translate the intended meaning, never the typo.',
+    '- Do not summarize, explain, censor, or add information. Use a natural, accurate business register.',
+    // 한국어 채팅은 주어·목적어를 자주 뺀다. 직역하면 영어가 수동태·명사구로 어색해진다(2026-09-29 실측).
+    '- Korean and Thai chat often drop the subject and object. Do not translate word-for-word or go passive to avoid a subject. Supply the subject a native speaker would use: "I" for the writer\'s own actions and promises, "you" for questions and requests to the reader, "we" for shared team plans, "they" for a third party reported by hearsay, "it"/"that" for the thing being discussed.',
+    '- Keep the writer\'s register: casual chat stays casual and short. Write it the way a colleague would actually type it in Slack.',
   ].join('\n');
 
   const blocks = [];

@@ -3,7 +3,7 @@ import http from 'node:http';
 import bolt from '@slack/bolt';
 import { loadConfig } from './config.mjs';
 import { createRateLimiter } from './core.mjs';
-import { createGeminiTranslator } from './translator.mjs';
+import { createOpenAITranslator } from './translator.mjs';
 import { registerHandlers } from './handlers.mjs';
 
 const { App, LogLevel, webApi } = bolt;
@@ -38,7 +38,7 @@ registerHandlers(app, {
   logger,
   limiter: createRateLimiter({ perUserPerMinute: config.perUserPerMinute, perDay: config.perDay }),
   translate: config.paidApiEnabled
-    ? createGeminiTranslator({ apiKey: config.geminiApiKey, model: config.geminiModel })
+    ? createOpenAITranslator({ apiKey: config.openaiApiKey, model: config.openaiModel })
     : null,
 });
 
@@ -74,7 +74,7 @@ async function main() {
     console.log(`health: http://${config.healthHost}:${config.healthPort}/health`);
   });
   await app.start();
-  console.log(`BLB Translator 시작 (유료 번역 API: ${config.paidApiEnabled ? '켜짐' : '꺼짐'}). 종료: Ctrl+C`);
+  console.log(`BLB Translator 시작 (유료 번역 API: ${config.paidApiEnabled ? `켜짐, ${config.openaiModel}` : '꺼짐'}). 종료: Ctrl+C`);
 }
 
 async function shutdown() {
