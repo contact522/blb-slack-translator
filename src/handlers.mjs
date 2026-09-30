@@ -63,6 +63,8 @@ export function registerHandlers(app, {
 }) {
   // 원문 기록. 버튼(다른 언어로 보기 등)을 누를 때 원문이 다시 필요하다. 메모리 보관이라 재시작하면 사라진다.
   const sources = new Map();
+  // 반응 중복 방지 (봇 이벤트 + 사용자 이벤트 동시 도착). 키→시각.
+  const recentReactions = new Map();
 
   const remember = (entry) => {
     const t = now();
@@ -211,6 +213,15 @@ export function registerHandlers(app, {
     if (event.reaction !== config.reaction || event.item?.type !== 'message') return;
     const { channel, ts } = event.item;
     const isDm = channel.startsWith('D'); // D=DM/그룹DM 채널 id 접두. 채널은 C/G.
+
+    // 봇 이벤트와 사용자 이벤트가 둘 다 구독돼 있으면, 봇이 든 채널에서 연결된 사람이 반응하면
+    // 같은 반응이 두 번 온다. 짧은 시간 안의 같은 (대화방·메시지·사람·이모지)는 한 번만 처리.
+    const dedupKey = `${channel}:${ts}:${event.user}:${event.reaction}`;
+    if (recentReactions.has(dedupKey)) return;
+    recentReactions.set(dedupKey, now());
+    for (const [k, t] of recentReactions) {
+      if (now() - t > 15_000) recentReactions.delete(k);
+    }
 
     // 본인 토큰이 있으면 그것으로(특히 DM). 없으면 봇 토큰으로(채널).
     const userToken = userTokens?.get(event.user) ?? null;
