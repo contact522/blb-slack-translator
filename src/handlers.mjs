@@ -137,6 +137,15 @@ export function registerHandlers(app, {
   async function run(client, { id, entry, userId, language, replaceUrl }) {
     const out = await translateText(client, userId, entry, language);
     const message = resultMessage({ id, language, truncated: entry.truncated, ...out });
+    // DM 에서 아직 연결 안 한 사람이면, 결과 아래에 「🌐 연결」 버튼을 붙인다.
+    // 연결하면 다음부터 이 DM 에서 🌐 한 번으로 번역된다(반응은 DM 에선 연결자만 온다).
+    if (entry.channel?.startsWith('D') && config.installUrl && userTokens && !userTokens.has(userId)) {
+      message.blocks = [
+        ...message.blocks,
+        { type: 'context', elements: [{ type: 'mrkdwn', text: '💡 이 DM 에서 🌐 한 번으로 번역하려면 연결하세요. / Connect to use 🌐 one-tap in this DM.' }] },
+        { type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: '🌐 연결 / Connect' }, url: config.installUrl }] },
+      ];
+    }
     if (replaceUrl) {
       await respond(replaceUrl, { replace_original: true, response_type: 'ephemeral', ...message })
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
