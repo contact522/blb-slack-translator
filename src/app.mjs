@@ -8,6 +8,7 @@ import { registerHandlers } from './handlers.mjs';
 import { createPrefStore } from './prefs.mjs';
 import { createUserTokenStore } from './userTokens.mjs';
 import { createOAuthRoutes } from './oauth.mjs';
+import { registerAutoJoin, joinAllPublicChannels } from './autojoin.mjs';
 import path from 'node:path';
 
 const { App, LogLevel, webApi } = bolt;
@@ -63,6 +64,9 @@ registerHandlers(app, {
     : null,
 });
 
+// 공개 채널 자동 참여 (새 채널·보관 해제 채널).
+if (config.autoJoinPublic) registerAutoJoin(app, { logger });
+
 // 팀원이 계정을 나가거나 앱을 제거하면 그 사람 토큰을 즉시 지운다.
 app.event('tokens_revoked', async ({ event }) => {
   for (const uid of event?.tokens?.oauth ?? []) userTokens?.delete(uid, 'app_removed');
@@ -112,6 +116,15 @@ async function main() {
     console.log(`web: http://${host}:${port}/health${config.dmEnabled ? ` (DM 연결: ${config.installUrl})` : ''}`);
   });
   await app.start();
+  if (config.autoJoinPublic) {
+    // 실패해도 번역 기능은 계속 돈다. 권한(channels:read, channels:join)이 없으면 로그만 남긴다.
+    try {
+      const r = await joinAllPublicChannels(app.client, logger);
+      console.log(`공개 채널 자동 참여: 새로 ${r.joined}, 이미/건너뜀 ${r.skipped}, 실패 ${r.failed}`);
+    } catch (err) {
+      console.error(`공개 채널 자동 참여 실패: ${err.data?.error ?? err.code ?? err.message}`);
+    }
+  }
   console.log(`BLB Translator 시작 (유료 번역 API: ${config.paidApiEnabled ? `켜짐, ${config.openaiModel}` : '꺼짐'}). 종료: Ctrl+C`);
 }
 

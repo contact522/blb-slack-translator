@@ -65,7 +65,6 @@ export function registerHandlers(app, {
   const sources = new Map();
   // 반응 중복 방지 (봇 이벤트 + 사용자 이벤트 동시 도착). 키→시각.
   const recentReactions = new Map();
-
   const remember = (entry) => {
     const t = now();
     for (const [k, v] of sources) {
@@ -232,13 +231,30 @@ export function registerHandlers(app, {
       if (now() - t > 15_000) recentReactions.delete(k);
     }
 
-    // 본인 토큰이 있으면 그것으로(특히 DM). 없으면 봇 토큰으로(채널).
     const userToken = userTokens?.get(event.user) ?? null;
-    const reader = userToken ? makeClient(userToken) : client;
+    const userClient = userToken ? makeClient(userToken) : null;
 
+    // 채널: 봇 토큰으로 먼저 읽는다(공개 채널은 자동 참여, 비공개는 /invite 한 곳).
+    // 봇이 못 읽으면(봇 없는 채널·그룹DM) 연결된 본인 토큰으로 읽고 본인으로서 나에게만 보낸다.
+    // DM: 봇은 못 들어가므로 바로 본인 토큰.
     let message;
+    let sender = client;
     try {
-      message = await readReactedMessage(reader, channel, ts);
+      let readByBot = false;
+      if (!isDm) {
+        try {
+          message = await readReactedMessage(client, channel, ts);
+          readByBot = true;
+        } catch (err) {
+          if (!userClient) throw err;
+        }
+      }
+      if (!readByBot) {
+        if (!userClient) throw Object.assign(new Error('no_reader'), { data: { error: 'no_reader' } });
+        message = await readReactedMessage(userClient, channel, ts);
+        sender = userClient;
+        userTokens.record(event.user, isDm ? 'dm' : 'channel', channel);
+      }
     } catch (err) {
       const code = err?.data?.error ?? err.message;
       // DM 인데 본인이 연결 안 했으면 연결 링크를 안내한다(봇 토큰으로 보냄).
@@ -252,10 +268,8 @@ export function registerHandlers(app, {
     }
     if (!message) return;
 
-    if (userToken) userTokens.record(event.user, isDm ? 'dm' : 'channel', channel);
     const entry = makeEntry({ channel, message });
-    // DM 은 본인 토큰으로 본인으로서 결과를 보낸다.
-    await start(userToken ? makeClient(userToken) : client, { userId: event.user, entry });
+    await start(sender, { userId: event.user, entry });
   });
 
   app.action(ACTION_RETRANSLATE, async ({ ack, body, action, client }) => {

@@ -23,7 +23,9 @@
         "chat:write",
         "reactions:read",
         "channels:history",
-        "groups:history"
+        "groups:history",
+        "channels:read",
+        "channels:join"
       ],
       "user": [
         "im:history",
@@ -44,7 +46,12 @@
       "bot_events": [
         "reaction_added",
         "tokens_revoked",
-        "user_change"
+        "user_change",
+        "channel_created",
+        "channel_unarchive"
+      ],
+      "user_events": [
+        "reaction_added"
       ]
     }
   }

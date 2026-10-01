@@ -23,7 +23,7 @@ YWH Slack 워크스페이스에서 메시지 ⋯ → **번역 / Translate** → 
 1. 메시지 ⋯ → 앱에 연결 → 번역 / Translate. 처음 한 번만 내 언어를 고르는 창이 뜨고, 다음부터는 누르면 바로 그 언어로 번역된다.
 2. 결과는 대화 안에 「나에게만 표시」로 나온다. 스레드 답글이면 그 스레드 안. 봇이 없는 대화방(사람끼리 DM 등)은 response_url 로 같은 방식으로 보낸다.
 3. 결과 아래 「다른 언어로 보기」는 이번만 다른 언어로 바꾸고, 「⚙ 기본 언어」는 저장된 내 언어를 바꾼다.
-4. 🌐(globe_with_meridians) 반응을 달아도 번역된다. 각자 Slack 설정에서 🌐를 마우스 올림 아이콘 줄(원클릭 반응)에 넣으면 한 번 클릭. 봇이 초대된 채널에서만 된다(반응 이벤트가 그곳만 온다).
+4. 🌐(globe_with_meridians) 반응을 달아도 번역된다. 각자 Slack 설정에서 🌐를 마우스 올림 아이콘 줄(원클릭 반응)에 넣으면 한 번 클릭. 봇이 들어가 있는 채널에서만 된다(반응 이벤트가 그곳만 온다). 공개 채널은 봇이 자동으로 들어간다(시작 시 전체 + 새로 만든/보관 해제한 채널, `AUTO_JOIN_PUBLIC`). 비공개 채널은 Slack 구조상 봇이 스스로 들어갈 수 없어, 🌐 를 쓰려면 채널에서 `/invite @BLB Translator` 를 한 번 해야 한다. ⋯→번역은 봇 초대 없이 어디서나 된다.
 5. 스레드 답글이면 같은 스레드 앞 메시지(최대 5개)를 뜻 파악에만 쓴다. 봇이 없는 곳은 이 메시지만 번역.
 6. 번역은 OpenAI `gpt-6-luna` 한 모델. 사람별 기본 언어는 `DATA_DIR/prefs.json`(서버는 Railway 볼륨 `/data`). 원문 기록은 메모리 24시간이라 재시작 후 옛 결과의 버튼은 「다시 번역해 주세요」로 안내.
 
@@ -37,7 +37,7 @@ DM·그룹DM 은 봇이 들어갈 수 없어, 본인이 한 번 「연결」하�
 - 보안 주의: 연결한 사람의 토큰은 그 사람의 **DM 전체를 읽을 수 있는 권한**이다. 서버가 이 토큰의 보관처가 되므로, `TOKEN_KEY` 는 볼륨과 분리해 환경변수로만 두고, 팀원에게 「연결하면 회사 번역 서버가 내 DM 을 읽을 수 있다」고 안내할 것.
 - 이 5개 환경변수(`PUBLIC_URL`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `TOKEN_KEY`, `STATE_SECRET`)가 모두 있어야 DM 기능이 켜진다. 없으면 채널 🌐 와 ⋯→번역만 동작한다.
 
-필요한 Bot scope: `commands`, `chat:write`, `reactions:read`, `channels:history`, `groups:history`. Event Subscriptions 에 `reaction_added`, `tokens_revoked`, `user_change`. DM 을 켜면 User scope 4개(`im:history`, `mpim:history`, `reactions:read`, `chat:write`).
+필요한 Bot scope: `commands`, `chat:write`, `reactions:read`, `channels:history`, `groups:history`, `channels:read`, `channels:join`. Event Subscriptions 에 `reaction_added`, `tokens_revoked`, `user_change`, `channel_created`, `channel_unarchive`. DM 을 켜면 User scope 4개(`im:history`, `mpim:history`, `reactions:read`, `chat:write`).
 
 ## 가장 쉬운 실행 (Windows)
 

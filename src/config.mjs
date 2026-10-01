@@ -45,6 +45,8 @@ export function loadConfig(env = process.env) {
     perUserPerMinute: int(env.RATE_LIMIT_PER_USER_PER_MINUTE, 10),
     perDay: int(env.RATE_LIMIT_PER_DAY, 500),
     // 이 반응(이모지 이름)을 달면 번역한다. 마우스 올림 아이콘 줄에 넣어 두면 한 번 클릭.
+    // 시작 시·새 공개 채널 생성 시 봇이 자동으로 들어간다. 끄려면 AUTO_JOIN_PUBLIC=false.
+    autoJoinPublic: bool(env.AUTO_JOIN_PUBLIC, true),
     reaction: env.TRANSLATE_REACTION || 'globe_with_meridians',
     // 사람별 기본 언어 저장 위치. 서버에서는 Railway 볼륨(/data)에 둔다.
     dataDir: env.DATA_DIR || 'data',
