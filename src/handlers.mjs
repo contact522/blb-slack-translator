@@ -114,7 +114,9 @@ export function registerHandlers(app, {
       await client.chat.postEphemeral({
         channel: entry.channel,
         user: userId,
-        thread_ts: entry.threadTs ?? undefined,
+        // 스레드 답글이면 그 스레드 안에, 채널 글(댓글이 달린 원글 포함)이면 채널 화면에 보인다.
+        // 원글은 thread_ts 가 자기 ts 와 같아서, 그대로 넘기면 결과가 댓글 창 안에 숨는다.
+        thread_ts: entry.threadTs && entry.threadTs !== entry.ts ? entry.threadTs : undefined,
         ...message,
       });
       return;
