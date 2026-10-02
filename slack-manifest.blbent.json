@@ -26,8 +26,17 @@
         "groups:history",
         "channels:read",
         "channels:join"
+      ],
+      "user": [
+        "im:history",
+        "mpim:history",
+        "reactions:read",
+        "chat:write"
       ]
-    }
+    },
+    "redirect_urls": [
+      "https://blb-slack-translator-blbent-production.up.railway.app/slack/oauth_redirect"
+    ]
   },
   "settings": {
     "interactivity": {
@@ -39,8 +48,13 @@
     "event_subscriptions": {
       "bot_events": [
         "reaction_added",
+        "tokens_revoked",
+        "user_change",
         "channel_created",
         "channel_unarchive"
+      ],
+      "user_events": [
+        "reaction_added"
       ]
     }
   }

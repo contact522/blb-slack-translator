@@ -200,7 +200,16 @@ export function registerHandlers(app, {
   }
 
   // 공통 시작점: 저장된 언어가 있으면 바로 번역, 없으면 언어 고르기 모달.
-  async function start(client, { userId, entry, triggerId }) {
+  // DM 은 봇이 못 들어가므로, 연결(DM 번역 허락)한 사람이면 본인 토큰으로 읽고 댓글 창 안에 보낸다.
+  function dmSender(entry, userId) {
+    if (!isDm(entry)) return null;
+    const token = userTokens?.get(userId);
+    if (!token) return null;
+    userTokens.record(userId, 'dm', entry.channel);
+    return makeClient(token);
+  }
+
+  async function start(client, { userId, entry, triggerId, sender = null }) {
     if (!entry.text) {
       await deliver(client, entry, userId, { text: '번역할 글이 없습니다. / Nothing to translate.' });
       return;
@@ -210,12 +219,13 @@ export function registerHandlers(app, {
     if (findLanguage(language)) {
       // DM 은 봇이 댓글 창에 넣을 수 없어 맨 아래에 붙는다. 대신 바로 작은 창을 띄워 그 안에 보여 준다.
       // trigger_id 는 3초 안에 써야 하므로 「번역 중」 창을 먼저 열고 결과로 바꾼다.
-      if (triggerId && isDm(entry)) {
+      // 연결한 사람은 본인 토큰(sender)으로 댓글 창 안에 넣으므로 창을 띄우지 않는다.
+      if (triggerId && isDm(entry) && !sender) {
         const opened = await client.views.open({ trigger_id: triggerId, view: loadingView() });
         await run(client, { id, entry, userId, language, viewId: opened?.view?.id });
         return;
       }
-      await run(client, { id, entry, userId, language });
+      await run(sender ?? client, { id, entry, userId, language });
       return;
     }
     if (triggerId) {
@@ -239,7 +249,7 @@ export function registerHandlers(app, {
       return;
     }
     const entry = makeEntry({ channel: body.channel?.id, message: body.message ?? {}, responseUrl: body.response_url });
-    await start(client, { userId: body.user.id, entry, triggerId: body.trigger_id });
+    await start(client, { userId: body.user.id, entry, triggerId: body.trigger_id, sender: dmSender(entry, body.user.id) });
   });
 
   // 반응한 메시지 하나를 읽는다. 봇 토큰(채널)과 사용자 토큰(DM) 양쪽에서 쓴다.
@@ -347,6 +357,12 @@ export function registerHandlers(app, {
     const { id, replaceUrl } = JSON.parse(view.private_metadata || '{}');
     const entry = id ? recall(id) : null;
     // DM 에서 처음 언어를 고른 경우: 언어 창을 「번역 중」 창으로 바꾸고 결과를 그 안에 보여 준다.
+    const sender = entry && !replaceUrl ? dmSender(entry, body.user.id) : null;
+    if (sender) {
+      await ack();
+      await run(sender, { id, entry, userId: body.user.id, language });
+      return;
+    }
     if (entry && !replaceUrl && isDm(entry)) {
       await ack({ response_action: 'update', view: loadingView() });
       await run(client, { id, entry, userId: body.user.id, language, viewId: view.id });

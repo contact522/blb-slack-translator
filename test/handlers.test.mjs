@@ -367,3 +367,21 @@ test('DM 에서 처음 언어를 고르면 그 창이 결과 창으로 바뀐다
   assert.match(JSON.stringify(updated.view.blocks), /번역-ko/);
   assert.equal(responded.length, 0);
 });
+
+test('DM 에서 연결한 사람의 ⋯→번역은 본인 토큰으로 그 글의 댓글 창 안에 넣는다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ tag: 'user' });
+  const { app, prefs, responded } = setup({ userTokens, userClients: { 'xoxp-u1': userClient } });
+  prefs.set('U1', 'ko');
+  const botClient = fakeClient({ ephemeralError: 'channel_not_found', tag: 'bot' });
+  const body = { ...shortcutBody({ ts: '5.0', text: 'Morning brief' }), channel: { id: 'D1' } };
+  await shortcut(app, botClient, body);
+  assert.equal(botClient.calls.some((c) => c[0] === 'open'), false);
+  const eph = userClient.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.equal(eph.channel, 'D1');
+  assert.equal(eph.thread_ts, '5.0');
+  assert.match(text(eph), /번역-ko/);
+  assert.equal(responded.length, 0);
+  assert.ok(userTokens.log.includes('read U1 dm D1'));
+});
