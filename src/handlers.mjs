@@ -104,6 +104,14 @@ export function registerHandlers(app, {
     }
   };
 
+  // 본인 토큰으로 만든 클라이언트 표시. Bolt 가 넘기는 봇 클라이언트는 요청마다 새 객체라 비교로는 구분이 안 된다.
+  const byUser = new WeakSet();
+  const asUser = (token) => {
+    const c = makeClient(token);
+    if (c && typeof c === 'object') byUser.add(c);
+    return c;
+  };
+
   const sameTeam = (teamId) => teamId === config.teamId;
   const isDm = (entry) => Boolean(entry.channel?.startsWith('D'));
 
@@ -148,7 +156,7 @@ export function registerHandlers(app, {
         ...message,
       });
       // 원인 추적용 한 줄(본문 없음): 어느 대화방·댓글 창에, 봇과 본인 토큰 중 무엇으로 넣었는지.
-      console.log(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${client === app.client ? 'bot' : 'token'}`);
+      console.log(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${byUser.has(client) ? 'token' : 'bot'}`);
       return;
     } catch (err) {
       const code = err?.data?.error ?? err.message;
@@ -193,7 +201,7 @@ export function registerHandlers(app, {
   // 채널은 봇 이름으로, DM 은 봇이 못 들어가 본인 토큰(본인 이름)으로 붙는다. 🌐 는 모두에게 보인다.
   // 우리가 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 중복 차단 목록에 먼저 넣는다(봇 반응은 핸들러가 거른다).
   async function markTranslated(client, entry, userId) {
-    if (client !== app.client) recentReactions.set(`${entry.channel}:${entry.ts}:${userId}:${config.reaction}`, now());
+    if (byUser.has(client)) recentReactions.set(`${entry.channel}:${entry.ts}:${userId}:${config.reaction}`, now());
     try {
       await client.reactions.add({ channel: entry.channel, timestamp: entry.ts, name: config.reaction });
     } catch (err) {
@@ -222,7 +230,7 @@ export function registerHandlers(app, {
     const token = userTokens?.get(userId);
     if (!token) return null;
     userTokens.record(userId, 'dm', entry.channel);
-    return makeClient(token);
+    return asUser(token);
   }
 
   async function start(client, { userId, entry, triggerId, sender = null }) {
@@ -303,7 +311,7 @@ export function registerHandlers(app, {
     }
 
     const userToken = userTokens?.get(event.user) ?? null;
-    const userClient = userToken ? makeClient(userToken) : null;
+    const userClient = userToken ? asUser(userToken) : null;
 
     // 채널: 봇 토큰으로 먼저 읽는다(공개 채널은 자동 참여, 비공개는 /invite 한 곳).
     // 봇이 못 읽으면(봇 없는 채널·그룹DM) 연결된 본인 토큰으로 읽고 본인으로서 나에게만 보낸다.

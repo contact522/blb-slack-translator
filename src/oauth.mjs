@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 
 // DM·그룹 DM 의 🌐 반응을 받고, 그 메시지를 읽고, 결과를 나에게만 보이게 보내는 데 필요한 최소 권한.
-export const USER_SCOPES = ['im:history', 'mpim:history', 'reactions:read', 'chat:write'];
+export const USER_SCOPES = ['im:history', 'mpim:history', 'reactions:read', 'chat:write', 'reactions:write'];
 export const INSTALL_PATH = '/slack/install';
 export const REDIRECT_PATH = '/slack/oauth_redirect';
 const STATE_TTL_MS = 10 * 60 * 1000;
