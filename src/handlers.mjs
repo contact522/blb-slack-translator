@@ -65,11 +65,14 @@ export function registerHandlers(app, {
   userTokens = null,
   makeClient = (token) => new (app.client.constructor)(token),
   respond = postJson, now = () => Date.now(),
+  trace = (line) => console.log(line), // 원인 추적용 한 줄 기록(본문 없음)
 }) {
   // 원문 기록. 버튼(다른 언어로 보기 등)을 누를 때 원문이 다시 필요하다. 메모리 보관이라 재시작하면 사라진다.
   const sources = new Map();
   // 반응 중복 방지 (봇 이벤트 + 사용자 이벤트 동시 도착). 키→시각.
   const recentReactions = new Map();
+  // 번역기가 본인 토큰으로 방금 붙인 🌐 (그 반응 이벤트를 한 번 무시하기 위해). 키→시각.
+  const selfReact = new Map();
   const remember = (entry) => {
     const t = now();
     for (const [k, v] of sources) {
@@ -156,7 +159,7 @@ export function registerHandlers(app, {
         ...message,
       });
       // 원인 추적용 한 줄(본문 없음): 어느 대화방·댓글 창에, 봇과 본인 토큰 중 무엇으로 넣었는지.
-      console.log(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${byUser.has(client) ? 'token' : 'bot'}`);
+      trace(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${byUser.has(client) ? 'token' : 'bot'}`);
       return;
     } catch (err) {
       const code = err?.data?.error ?? err.message;
@@ -174,6 +177,8 @@ export function registerHandlers(app, {
   }
 
   async function run(client, { id, entry, userId, language, replaceUrl, viewId }) {
+    // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
+    if (!viewId && !replaceUrl) await markTranslated(client, entry, userId);
     const out = await translateText(client, userId, entry, language);
     const message = resultMessage({ id, language, truncated: entry.truncated, ...out });
     // DM 에서 아직 연결 안 한 사람이면, 결과 아래에 「🌐 연결」 버튼을 붙인다.
@@ -193,7 +198,6 @@ export function registerHandlers(app, {
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
       await deliver(client, entry, userId, message);
-      if (out.status === 'done') await markTranslated(client, entry, userId);
     }
   }
 
@@ -201,10 +205,13 @@ export function registerHandlers(app, {
   // 채널은 봇 이름으로, DM 은 봇이 못 들어가 본인 토큰(본인 이름)으로 붙는다. 🌐 는 모두에게 보인다.
   // 우리가 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 중복 차단 목록에 먼저 넣는다(봇 반응은 핸들러가 거른다).
   async function markTranslated(client, entry, userId) {
-    if (byUser.has(client)) recentReactions.set(`${entry.channel}:${entry.ts}:${userId}:${config.reaction}`, now());
+    const selfKey = `self:${entry.channel}:${entry.ts}:${userId}:${config.reaction}`;
+    if (byUser.has(client)) selfReact.set(selfKey, now());
     try {
       await client.reactions.add({ channel: entry.channel, timestamp: entry.ts, name: config.reaction });
     } catch (err) {
+      // 이미 붙어 있으면(사람이 🌐 로 요청한 경우 등) 이벤트가 안 오므로 무시 표시를 지운다.
+      selfReact.delete(selfKey);
       const code = err?.data?.error ?? err.message;
       if (code !== 'already_reacted') logger.warn(`🌐 표시 실패: ${code}`);
     }
@@ -273,7 +280,7 @@ export function registerHandlers(app, {
       return;
     }
     const entry = makeEntry({ channel: body.channel?.id, message: body.message ?? {}, responseUrl: body.response_url });
-    console.log(`[메뉴] ${entry.channel} ${entry.ts} by=${body.user.id}`);
+    trace(`[메뉴] ${entry.channel} ${entry.ts} by=${body.user.id}`);
     await start(client, { userId: body.user.id, entry, triggerId: body.trigger_id, sender: dmSender(entry, body.user.id) });
   });
 
@@ -299,16 +306,29 @@ export function registerHandlers(app, {
     if (context?.botUserId && event.user === context.botUserId) return;
     const { channel, ts } = event.item;
     const isDm = channel.startsWith('D'); // D=DM/그룹DM 채널 id 접두. 채널은 C/G.
-    console.log(`[반응] ${channel} ${ts} by=${event.user} as=${body?.authorizations?.[0]?.is_bot ? 'bot' : 'user'}`);
+    trace(`[반응] ${channel} ${ts} by=${event.user} as=${body?.authorizations?.[0]?.is_bot ? 'bot' : 'user'}`);
 
     // 봇 이벤트와 사용자 이벤트가 둘 다 구독돼 있으면, 봇이 든 채널에서 연결된 사람이 반응하면
     // 같은 반응이 두 번 온다. 짧은 시간 안의 같은 (대화방·메시지·사람·이모지)는 한 번만 처리.
+    // - 봇·사용자 이벤트 동시 도착: 같은 (대화방·메시지·사람·이모지)는 15초 안에 한 번만.
+    // - Slack 재전송: 같은 event_id 는 1시간 안에 한 번만(늦게 다시 와도 막는다).
+    // - 번역기가 본인 토큰으로 붙인 🌐: 그 직후 한 번만 무시(selfReact). 사람이 🌐 를 껐다 다시 누르면 번역한다.
     const dedupKey = `${channel}:${ts}:${event.user}:${event.reaction}`;
-    if (recentReactions.has(dedupKey)) return;
-    recentReactions.set(dedupKey, now());
+    const eventKey = body?.event_id ? `e:${body.event_id}` : null;
+    const t0 = now();
     for (const [k, t] of recentReactions) {
-      if (now() - t > 60 * 60 * 1000) recentReactions.delete(k); // Slack 재전송(늦게 다시 옴)까지 막도록 1시간
+      if (t0 - t > (k.startsWith('e:') ? 60 * 60 * 1000 : 15_000)) recentReactions.delete(k);
     }
+    if (eventKey && recentReactions.has(eventKey)) return;
+    if (eventKey) recentReactions.set(eventKey, t0);
+    const selfKey = `self:${dedupKey}`;
+    if (selfReact.has(selfKey)) {
+      const at = selfReact.get(selfKey);
+      selfReact.delete(selfKey);
+      if (t0 - at < 30_000) return;
+    }
+    if (recentReactions.has(dedupKey)) return;
+    recentReactions.set(dedupKey, t0);
 
     const userToken = userTokens?.get(event.user) ?? null;
     const userClient = userToken ? asUser(userToken) : null;

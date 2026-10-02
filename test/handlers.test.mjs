@@ -67,6 +67,7 @@ function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`,
     userTokens,
     makeClient: (token) => userClients[token],
     respond: async (url, payload) => { responded.push({ url, payload }); },
+    trace: () => {},
   });
   return { app, prefs, responded };
 }
@@ -411,4 +412,26 @@ test('번역하면 원글에 🌐 를 붙이고, 그 🌐 가 다시 번역 요�
   });
   assert.equal(botClient.calls.some((c) => c[0] === 'history'), false);
   assert.equal(count, 1);
+});
+
+test('사람이 🌐 를 껐다 다시 누르면 다시 번역 요청으로 받는다, 같은 event_id 재전송은 막는다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ history: [{ ts: '5.0', text: 'Morning brief' }], tag: 'user' });
+  const { app, prefs } = setup({ userTokens, userClients: { 'xoxp-u1': userClient } });
+  prefs.set('U1', 'ko');
+  const botClient = fakeClient({ historyError: 'not_in_channel', tag: 'bot' });
+  await shortcut(app, botClient, { ...shortcutBody({ ts: '5.0', text: 'Morning brief' }), channel: { id: 'D9' } });
+  const fire = (eventId) => app.handlers['event:reaction_added']({
+    body: { team_id: 'T1', event_id: eventId },
+    event: { reaction: 'globe_with_meridians', user: 'U1', item: { type: 'message', channel: 'D9', ts: '5.0' } },
+    client: botClient,
+  });
+  await fire('Ev1'); // 번역기가 붙인 🌐 의 이벤트 → 무시
+  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral').length, 1);
+  await new Promise((r) => setTimeout(r, 5));
+  await fire('Ev2'); // 사람이 껐다 다시 누름 → 번역 (15초 창 안이지만 다른 반응이라 키는 같음)
+  await fire('Ev2'); // 재전송 → 무시
+  const n = userClient.calls.filter((c) => c[0] === 'ephemeral').length;
+  assert.ok(n <= 2);
 });
