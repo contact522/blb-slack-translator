@@ -147,6 +147,8 @@ export function registerHandlers(app, {
         thread_ts: entry.threadTs ?? undefined,
         ...message,
       });
+      // 원인 추적용 한 줄(본문 없음): 어느 대화방·댓글 창에, 봇과 본인 토큰 중 무엇으로 넣었는지.
+      console.log(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${client === app.client ? 'bot' : 'token'}`);
       return;
     } catch (err) {
       const code = err?.data?.error ?? err.message;
@@ -249,6 +251,7 @@ export function registerHandlers(app, {
       return;
     }
     const entry = makeEntry({ channel: body.channel?.id, message: body.message ?? {}, responseUrl: body.response_url });
+    console.log(`[메뉴] ${entry.channel} ${entry.ts} by=${body.user.id}`);
     await start(client, { userId: body.user.id, entry, triggerId: body.trigger_id, sender: dmSender(entry, body.user.id) });
   });
 
@@ -272,6 +275,7 @@ export function registerHandlers(app, {
     if (event.reaction !== config.reaction || event.item?.type !== 'message') return;
     const { channel, ts } = event.item;
     const isDm = channel.startsWith('D'); // D=DM/그룹DM 채널 id 접두. 채널은 C/G.
+    console.log(`[반응] ${channel} ${ts} by=${event.user} as=${body?.authorizations?.[0]?.is_bot ? 'bot' : 'user'}`);
 
     // 봇 이벤트와 사용자 이벤트가 둘 다 구독돼 있으면, 봇이 든 채널에서 연결된 사람이 반응하면
     // 같은 반응이 두 번 온다. 짧은 시간 안의 같은 (대화방·메시지·사람·이모지)는 한 번만 처리.
@@ -279,7 +283,7 @@ export function registerHandlers(app, {
     if (recentReactions.has(dedupKey)) return;
     recentReactions.set(dedupKey, now());
     for (const [k, t] of recentReactions) {
-      if (now() - t > 15_000) recentReactions.delete(k);
+      if (now() - t > 60 * 60 * 1000) recentReactions.delete(k); // Slack 재전송(늦게 다시 옴)까지 막도록 1시간
     }
 
     const userToken = userTokens?.get(event.user) ?? null;
