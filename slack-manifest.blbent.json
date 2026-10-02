@@ -1,0 +1,47 @@
+{
+  "display_information": {
+    "name": "BLB Translator"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "BLB Translator",
+      "always_online": false
+    },
+    "shortcuts": [
+      {
+        "name": "번역 / Translate",
+        "type": "message",
+        "callback_id": "translate_message",
+        "description": "이 메시지를 내 언어로 번역해 나에게만 보여 줍니다"
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "commands",
+        "chat:write",
+        "reactions:read",
+        "channels:history",
+        "groups:history",
+        "channels:read",
+        "channels:join"
+      ]
+    }
+  },
+  "settings": {
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false,
+    "event_subscriptions": {
+      "bot_events": [
+        "reaction_added",
+        "channel_created",
+        "channel_unarchive"
+      ]
+    }
+  }
+}

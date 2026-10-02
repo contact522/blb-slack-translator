@@ -39,6 +39,13 @@ DM·그룹DM 은 봇이 들어갈 수 없어, 본인이 한 번 「연결」하�
 
 필요한 Bot scope: `commands`, `chat:write`, `reactions:read`, `channels:history`, `groups:history`, `channels:read`, `channels:join`. Event Subscriptions 에 `reaction_added`, `tokens_revoked`, `user_change`, `channel_created`, `channel_unarchive`. DM 을 켜면 User scope 4개(`im:history`, `mpim:history`, `reactions:read`, `chat:write`).
 
+## BLB ENT 워크스페이스 (2026-10-02 추가)
+
+같은 코드를 Railway 서비스 `blb-slack-translator-blbent` 로 하나 더 띄운다. 워크스페이스마다 Slack 앱·토큰·볼륨이 따로다.
+- Slack 앱: BLB ENT 에 `slack-manifest.blbent.json` 으로 만든 별도 앱. DM 연결(사용자 토큰)은 넣지 않았다(⋯→번역은 DM 에서도 된다).
+- 배포: `scripts/deploy-blbent.ps1` (토큰 2개 입력 → 서비스·볼륨·변수·배포). OpenAI 키와 호출 한도는 YWH 서비스 값을 복사한다.
+- `SLACK_TEAM_ID=T0ADPU28Y6R`. 공개 채널은 자동 참여, 비공개 채널은 `/invite @BLB Translator`.
+
 ## 가장 쉬운 실행 (Windows)
 
 1. GitHub 저장소 → Code → Download ZIP → 압축 풀기

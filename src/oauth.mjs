@@ -90,7 +90,7 @@ export function createOAuthRoutes({ config, userTokens, fetchImpl = fetch, logge
     const user = data?.authed_user;
     if (!data?.ok || !user?.access_token || data?.team?.id !== config.teamId) {
       logger.warn(`사용자 연결 거절: ${data?.error ?? 'team_or_token_mismatch'}`);
-      send(400, page('연결하지 못했습니다', '<p>YWH 워크스페이스 계정으로 다시 시도해 주세요.</p><p class="small">Please try again with your YWH workspace account.</p>'));
+      send(400, page('연결하지 못했습니다', '<p>번역기가 설치된 워크스페이스 계정으로 다시 시도해 주세요.</p><p class="small">Please try again with the account of the workspace where this translator is installed.</p>'));
       return true;
     }
     userTokens.set(user.id, user.access_token, user.scope);
