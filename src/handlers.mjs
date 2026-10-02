@@ -181,9 +181,9 @@ export function registerHandlers(app, {
     }
   }
 
-  async function run(client, { id, entry, userId, language, replaceUrl, viewId }) {
+  async function run(client, { id, entry, userId, language, replaceUrl, viewId, fromReaction = false }) {
     // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
-    if (!viewId && !replaceUrl) await markTranslated(client, entry, userId);
+    if (!viewId && !replaceUrl && !fromReaction) await markTranslated(client, entry, userId);
     // 같은 사람이 같은 글을 같은 언어로 이미 받았으면 다시 보내지 않는다(대표 요청: 중복 금지).
     // 「나에게만 표시」는 새로고침하면 사라지므로 10분만 막는다(그 뒤엔 다시 누르면 다시 보낸다).
     const sentKey = `${userId}:${doneKey(entry, language)}`; // 글을 고치면 원문 해시가 달라져 다시 보낸다
@@ -253,13 +253,16 @@ export function registerHandlers(app, {
   }
 
   // 번역한 글에 🌐 를 붙인다(대표 요청). 결과는 댓글 창 안이라 글 아래 표시가 안 생기기 때문.
-  // 채널은 봇 이름으로, DM 은 봇이 못 들어가 본인 토큰(본인 이름)으로 붙는다. 🌐 는 모두에게 보인다.
-  // 우리가 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 중복 차단 목록에 먼저 넣는다(봇 반응은 핸들러가 거른다).
+  // 누른 사람 이름으로 붙인다(대표 요청: 누른 사람만 보이게). 연결(본인 토큰)한 사람이면 채널·DM 모두 본인 이름,
+  // 연결 안 한 사람은 채널에서만 번역기 이름으로 붙는다. 🌐 로 요청한 경우는 이미 본인 🌐 가 있어 붙이지 않는다(run).
+  // 본인 토큰으로 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 한 번 무시 표시를 먼저 남긴다(봇 반응은 핸들러가 거른다).
   async function markTranslated(client, entry, userId) {
+    const token = userTokens?.get(userId);
+    const reactor = byUser.has(client) ? client : (token ? asUser(token) : client);
     const selfKey = `self:${entry.channel}:${entry.ts}:${userId}:${config.reaction}`;
-    if (byUser.has(client)) selfReact.set(selfKey, now());
+    if (byUser.has(reactor)) selfReact.set(selfKey, now());
     try {
-      await client.reactions.add({ channel: entry.channel, timestamp: entry.ts, name: config.reaction });
+      await reactor.reactions.add({ channel: entry.channel, timestamp: entry.ts, name: config.reaction });
     } catch (err) {
       // 이미 붙어 있으면(사람이 🌐 로 요청한 경우 등) 이벤트가 안 오므로 무시 표시를 지운다.
       selfReact.delete(selfKey);
@@ -291,7 +294,7 @@ export function registerHandlers(app, {
     return asUser(token);
   }
 
-  async function start(client, { userId, entry, triggerId, sender = null }) {
+  async function start(client, { userId, entry, triggerId, sender = null, fromReaction = false }) {
     if (!entry.text) {
       await deliver(client, entry, userId, { text: '번역할 글이 없습니다. / Nothing to translate.' });
       return;
@@ -307,7 +310,7 @@ export function registerHandlers(app, {
         await run(client, { id, entry, userId, language, viewId: opened?.view?.id });
         return;
       }
-      await run(sender ?? client, { id, entry, userId, language });
+      await run(sender ?? client, { id, entry, userId, language, fromReaction });
       return;
     }
     if (triggerId) {
@@ -419,7 +422,7 @@ export function registerHandlers(app, {
     if (!message) return;
 
     const entry = makeEntry({ channel, message });
-    await start(sender, { userId: event.user, entry });
+    await start(sender, { userId: event.user, entry, fromReaction: true });
   });
 
   app.action(ACTION_RETRANSLATE, async ({ ack, body, action, client }) => {

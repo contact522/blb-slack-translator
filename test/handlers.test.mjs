@@ -462,3 +462,25 @@ test('번역 저장본을 그 사람과 번역기의 1:1 대화방에 원글 링
   await shortcut(app, client, shortcutBody({ ts: '7.0', text: 'Daily report (edited)' }));
   assert.equal(posted.length, 2);
 });
+
+test('🌐 는 누른 사람 이름으로만: 🌐 로 요청하면 번역기가 또 붙이지 않고, 연결한 사람의 ⋯→번역은 채널에서도 본인 이름', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ tag: 'user' });
+  const { app, prefs } = setup({ userTokens, userClients: { 'xoxp-u1': userClient } });
+  prefs.set('U1', 'ko');
+  prefs.set('U2', 'ko');
+  const botClient = fakeClient({ history: [{ ts: '3.0', text: 'Hello team' }], tag: 'bot' });
+  // 채널에서 연결한 사람의 ⋯→번역 → 본인 토큰으로 🌐, 번역기 🌐 없음
+  await shortcut(app, botClient, shortcutBody({ ts: '2.0', text: 'Report' }));
+  assert.equal(userClient.calls.filter((c) => c[0] === 'react').length, 1);
+  assert.equal(botClient.calls.filter((c) => c[0] === 'react').length, 0);
+  // 연결 안 한 사람이 🌐 로 요청 → 아무도 🌐 를 더 붙이지 않는다
+  await app.handlers['event:reaction_added']({
+    body: { team_id: 'T1', event_id: 'EvX' },
+    event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C1', ts: '3.0' } },
+    client: botClient,
+  });
+  assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(botClient.calls.filter((c) => c[0] === 'react').length, 0);
+});
