@@ -299,3 +299,22 @@ test('DM 읽기는 감사 기록을 남긴다', async () => {
   await dmReaction(app, fakeClient({ historyError: 'not_in_channel' }));
   assert.ok(userTokens.log.some((l) => l.startsWith('read U1 dm D9')));
 });
+
+test('같은 메시지를 같은 언어로 다시 누르면 번역 API 를 다시 부르지 않는다', async () => {
+  let count = 0;
+  const { app, prefs } = setup({ translate: async (a) => { count += 1; return `번역-${a.targetCode}`; } });
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  const body = shortcutBody({ ts: '7.0', text: 'Daily report' });
+  await shortcut(app, client, body);
+  await shortcut(app, client, body);
+  assert.equal(count, 1);
+  const results = client.calls.filter((c) => c[0] === 'ephemeral');
+  assert.equal(results.length, 2);
+  assert.match(text(results[1][1]), /번역-ko/);
+  // 다른 언어나 고친 글은 새로 번역한다.
+  prefs.set('U1', 'th');
+  await shortcut(app, client, body);
+  await shortcut(app, client, shortcutBody({ ts: '7.0', text: 'Daily report (edited)' }));
+  assert.equal(count, 3);
+});

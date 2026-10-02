@@ -22,6 +22,9 @@ export const SHORTCUT_ID = 'translate_message';
 export const MAX_SOURCE_CHARS = 4000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 2000;
+// 같은 메시지·같은 언어는 다시 번역하지 않고 저장된 결과를 보여 준다(비용 0, 즉시).
+// 메모리에만 둔다(본문을 디스크에 쌓지 않는다). 재시작하면 비워진다. 글을 고치면 원문이 달라져 새로 번역한다.
+const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // 스레드 앞선 메시지를 읽는다. 권한이 없거나 스레드가 아니면 빈 문맥으로 계속한다.
 export async function loadContext(client, meta) {
@@ -81,12 +84,33 @@ export function registerHandlers(app, {
     return e;
   };
 
+  // 번역 결과 재사용. 키: 대화방·메시지·언어·원문 해시.
+  const done = new Map();
+  const doneKey = (entry, language) =>
+    `${entry.channel}:${entry.ts}:${language}:${crypto.createHash('sha1').update(entry.text).digest('hex')}`;
+  const reuse = (key) => {
+    const e = done.get(key);
+    if (!e || now() - e.at > DONE_TTL_MS) return null;
+    return e.out;
+  };
+  const keep = (key, out) => {
+    done.delete(key);
+    done.set(key, { out, at: now() });
+    for (const k of done.keys()) {
+      if (done.size <= CACHE_MAX) break;
+      done.delete(k);
+    }
+  };
+
   const sameTeam = (teamId) => teamId === config.teamId;
 
   async function translateText(client, userId, entry, language) {
     if (!config.paidApiEnabled) {
       return { status: 'done', result: '_(미리보기 / Preview)_ 유료 번역 API가 꺼져 있어 실제 번역은 하지 않았습니다. / Paid translation API is off; nothing was translated.' };
     }
+    const key = doneKey(entry, language);
+    const saved = reuse(key);
+    if (saved) return saved;
     const allowed = limiter.check(userId);
     if (!allowed.ok) {
       return {
@@ -101,7 +125,9 @@ export function registerHandlers(app, {
     try {
       const result = await translate({ text: entry.text, targetCode: language, context });
       const note = context.length ? `스레드 앞 메시지 ${context.length}개를 참고했습니다. / Used ${context.length} earlier thread message(s).` : null;
-      return { status: 'done', result, note };
+      const out = { status: 'done', result, note };
+      keep(key, out);
+      return out;
     } catch (err) {
       logger.error(`번역 실패: ${err.message}`);
       return { status: 'error', result: '번역에 실패했습니다. 잠시 뒤 다시 시도해 주세요. / Translation failed; please try again.' };
