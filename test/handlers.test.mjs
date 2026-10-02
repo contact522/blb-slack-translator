@@ -318,3 +318,12 @@ test('같은 메시지를 같은 언어로 다시 누르면 번역 API 를 다�
   await shortcut(app, client, shortcutBody({ ts: '7.0', text: 'Daily report (edited)' }));
   assert.equal(count, 3);
 });
+
+test('댓글이 없는 글도 결과는 그 글의 댓글 창 안에 둔다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'No replies yet' }));
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.equal(eph.thread_ts, '9.0');
+});

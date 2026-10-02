@@ -140,7 +140,7 @@ export function registerHandlers(app, {
       await client.chat.postEphemeral({
         channel: entry.channel,
         user: userId,
-        // 댓글이 달린 원글·댓글 답글이면 그 댓글 창 안에 보인다.
+        // 원글이든 댓글이든 그 글의 댓글 창 안에 보인다.
         thread_ts: entry.threadTs ?? undefined,
         ...message,
       });
@@ -185,8 +185,8 @@ export function registerHandlers(app, {
     return {
       channel,
       ts: message.ts,
-      // 댓글이 달린 원글인데 thread_ts 가 빠져 오는 경우가 있어 reply_count 로도 판단한다.
-      threadTs: message.thread_ts ?? (message.reply_count > 0 ? message.ts : null),
+      // 결과는 항상 그 글의 댓글 창 안에 둔다(대표 요청). 댓글이 없는 글도 자기 ts 를 스레드로 쓴다.
+      threadTs: message.thread_ts ?? message.ts ?? null,
       text: full.slice(0, MAX_SOURCE_CHARS),
       truncated: full.length > MAX_SOURCE_CHARS,
       responseUrl: responseUrl ?? null,
