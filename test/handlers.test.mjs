@@ -36,6 +36,7 @@ function fakeClient({ replies, history, ephemeralError, historyError, tag } = {}
         if (ephemeralError) throw Object.assign(new Error('x'), { data: { error: ephemeralError } });
       },
     },
+    reactions: { add: async (a) => { calls.push(['react', a]); } },
     conversations: {
       replies: async (a) => {
         calls.push(['replies', a]);
@@ -384,4 +385,30 @@ test('DM 에서 연결한 사람의 ⋯→번역은 본인 토큰으로 그 글�
   assert.match(text(eph), /번역-ko/);
   assert.equal(responded.length, 0);
   assert.ok(userTokens.log.includes('read U1 dm D1'));
+});
+
+test('번역하면 원글에 🌐 를 붙이고, 그 🌐 가 다시 번역 요청으로 돌아오지 않는다', async () => {
+  const userTokens = createMemoryUserTokenStore();
+  userTokens.set('U1', 'xoxp-u1', 'im:history');
+  const userClient = fakeClient({ history: [{ ts: '5.0', text: 'Morning brief' }], tag: 'user' });
+  let count = 0;
+  const { app, prefs } = setup({ userTokens, userClients: { 'xoxp-u1': userClient }, translate: async () => { count += 1; return '번역'; } });
+  prefs.set('U1', 'ko');
+  const botClient = fakeClient({ historyError: 'not_in_channel', tag: 'bot' });
+  // DM ⋯→번역: 본인 토큰으로 원글에 🌐
+  await shortcut(app, botClient, { ...shortcutBody({ ts: '5.0', text: 'Morning brief' }), channel: { id: 'D9' } });
+  const react = userClient.calls.find((c) => c[0] === 'react')[1];
+  assert.deepEqual(react, { channel: 'D9', timestamp: '5.0', name: 'globe_with_meridians' });
+  // 방금 붙인 🌐 의 반응 이벤트는 무시
+  await dmReaction(app, botClient, 'U1', 'D9', '5.0');
+  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral').length, 1);
+  // 번역기 자신이 붙인 🌐 도 무시
+  await app.handlers['event:reaction_added']({
+    body: { team_id: 'T1' },
+    event: { reaction: 'globe_with_meridians', user: 'UBOT', item: { type: 'message', channel: 'C1', ts: '8.0' } },
+    client: botClient,
+    context: { botUserId: 'UBOT' },
+  });
+  assert.equal(botClient.calls.some((c) => c[0] === 'history'), false);
+  assert.equal(count, 1);
 });

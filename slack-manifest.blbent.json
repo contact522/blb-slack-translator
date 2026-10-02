@@ -25,13 +25,16 @@
         "channels:history",
         "groups:history",
         "channels:read",
-        "channels:join"
+        "channels:join",
+        "users:read",
+        "reactions:write"
       ],
       "user": [
         "im:history",
         "mpim:history",
         "reactions:read",
-        "chat:write"
+        "chat:write",
+        "reactions:write"
       ]
     },
     "redirect_urls": [

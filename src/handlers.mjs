@@ -185,6 +185,20 @@ export function registerHandlers(app, {
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
       await deliver(client, entry, userId, message);
+      if (out.status === 'done') await markTranslated(client, entry, userId);
+    }
+  }
+
+  // 번역한 글에 🌐 를 붙인다(대표 요청). 결과는 댓글 창 안이라 글 아래 표시가 안 생기기 때문.
+  // 채널은 봇 이름으로, DM 은 봇이 못 들어가 본인 토큰(본인 이름)으로 붙는다. 🌐 는 모두에게 보인다.
+  // 우리가 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 중복 차단 목록에 먼저 넣는다(봇 반응은 핸들러가 거른다).
+  async function markTranslated(client, entry, userId) {
+    if (client !== app.client) recentReactions.set(`${entry.channel}:${entry.ts}:${userId}:${config.reaction}`, now());
+    try {
+      await client.reactions.add({ channel: entry.channel, timestamp: entry.ts, name: config.reaction });
+    } catch (err) {
+      const code = err?.data?.error ?? err.message;
+      if (code !== 'already_reacted') logger.warn(`🌐 표시 실패: ${code}`);
     }
   }
 
@@ -270,9 +284,11 @@ export function registerHandlers(app, {
   // 🌐 반응.
   // - 채널: 봇이 참여한 곳의 이벤트만 온다. 봇 토큰으로 읽고 봇으로 나에게만 보낸다.
   // - DM/그룹DM: 반응한 본인이 연결(userTokens)돼 있으면 그 사람 토큰으로 읽고 그 사람으로서 나에게만 보낸다.
-  app.event('reaction_added', async ({ event, body, client }) => {
+  app.event('reaction_added', async ({ event, body, client, context }) => {
     if (!sameTeam(body?.team_id)) return;
     if (event.reaction !== config.reaction || event.item?.type !== 'message') return;
+    // 번역기가 직접 붙인 🌐 는 번역 요청이 아니다.
+    if (context?.botUserId && event.user === context.botUserId) return;
     const { channel, ts } = event.item;
     const isDm = channel.startsWith('D'); // D=DM/그룹DM 채널 id 접두. 채널은 C/G.
     console.log(`[반응] ${channel} ${ts} by=${event.user} as=${body?.authorizations?.[0]?.is_bot ? 'bot' : 'user'}`);

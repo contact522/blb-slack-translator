@@ -25,13 +25,15 @@
         "channels:history",
         "groups:history",
         "channels:read",
-        "channels:join"
+        "channels:join",
+        "reactions:write"
       ],
       "user": [
         "im:history",
         "mpim:history",
         "reactions:read",
-        "chat:write"
+        "chat:write",
+        "reactions:write"
       ]
     }
   },
