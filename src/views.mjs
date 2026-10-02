@@ -55,6 +55,30 @@ export function resultMessage({ id, language, result, status = 'done', note, tru
   return { text: `${lang?.label ?? language} 번역 / Translation`, blocks };
 }
 
+// DM 처럼 봇이 대화방에 글을 못 넣는 곳은 결과를 작은 창으로 보여 준다.
+// 「나에게만 표시」를 response_url 로 보내면 댓글 창이 아니라 대화 맨 아래에 붙기 때문이다.
+const RESULT_TITLE = { type: 'plain_text', text: '번역 / Translation' };
+const CLOSE = { type: 'plain_text', text: '닫기 / Close' };
+
+export function loadingView() {
+  return {
+    type: 'modal',
+    title: RESULT_TITLE,
+    close: CLOSE,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: ':hourglass_flowing_sand: 번역 중… / Translating…' } }],
+  };
+}
+
+// 결과 메시지를 창으로. 「다른 언어로 보기」·「기본 언어」 줄은 대화 메시지용이라 뺀다.
+export function resultView(message) {
+  return {
+    type: 'modal',
+    title: RESULT_TITLE,
+    close: CLOSE,
+    blocks: message.blocks.filter((b) => !String(b.block_id ?? '').startsWith(RESULT_BLOCK_PREFIX)),
+  };
+}
+
 // 원문 기록이 만료되어(서버 재시작 등) 다시 번역할 수 없을 때.
 export function expiredMessage() {
   return {

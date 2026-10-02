@@ -16,6 +16,8 @@ import {
   ACTION_RETRANSLATE,
   ACTION_CHANGE_DEFAULT,
   RESULT_BLOCK_PREFIX,
+  loadingView,
+  resultView,
 } from './views.mjs';
 
 export const SHORTCUT_ID = 'translate_message';
@@ -103,6 +105,7 @@ export function registerHandlers(app, {
   };
 
   const sameTeam = (teamId) => teamId === config.teamId;
+  const isDm = (entry) => Boolean(entry.channel?.startsWith('D'));
 
   async function translateText(client, userId, entry, language) {
     if (!config.paidApiEnabled) {
@@ -160,7 +163,7 @@ export function registerHandlers(app, {
     }
   }
 
-  async function run(client, { id, entry, userId, language, replaceUrl }) {
+  async function run(client, { id, entry, userId, language, replaceUrl, viewId }) {
     const out = await translateText(client, userId, entry, language);
     const message = resultMessage({ id, language, truncated: entry.truncated, ...out });
     // DM 에서 아직 연결 안 한 사람이면, 결과 아래에 「🌐 연결」 버튼을 붙인다.
@@ -172,7 +175,10 @@ export function registerHandlers(app, {
         { type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: '🌐 연결 / Connect' }, url: config.installUrl }] },
       ];
     }
-    if (replaceUrl) {
+    if (viewId) {
+      await client.views.update({ view_id: viewId, view: resultView(message) })
+        .catch((err) => logger.warn(`결과 창 갱신 실패: ${err?.data?.error ?? err.message}`));
+    } else if (replaceUrl) {
       await respond(replaceUrl, { replace_original: true, response_type: 'ephemeral', ...message })
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
@@ -202,6 +208,13 @@ export function registerHandlers(app, {
     const id = remember(entry);
     const language = prefs.get(userId);
     if (findLanguage(language)) {
+      // DM 은 봇이 댓글 창에 넣을 수 없어 맨 아래에 붙는다. 대신 바로 작은 창을 띄워 그 안에 보여 준다.
+      // trigger_id 는 3초 안에 써야 하므로 「번역 중」 창을 먼저 열고 결과로 바꾼다.
+      if (triggerId && isDm(entry)) {
+        const opened = await client.views.open({ trigger_id: triggerId, view: loadingView() });
+        await run(client, { id, entry, userId, language, viewId: opened?.view?.id });
+        return;
+      }
       await run(client, { id, entry, userId, language });
       return;
     }
@@ -325,13 +338,21 @@ export function registerHandlers(app, {
   });
 
   app.view(PREF_CALLBACK_ID, async ({ ack, body, view, client }) => {
-    await ack();
-    if (!sameTeam(body?.team?.id)) return;
     const language = readPref(view);
-    if (!findLanguage(language)) return;
+    if (!sameTeam(body?.team?.id) || !findLanguage(language)) {
+      await ack();
+      return;
+    }
     prefs.set(body.user.id, language);
     const { id, replaceUrl } = JSON.parse(view.private_metadata || '{}');
     const entry = id ? recall(id) : null;
+    // DM 에서 처음 언어를 고른 경우: 언어 창을 「번역 중」 창으로 바꾸고 결과를 그 안에 보여 준다.
+    if (entry && !replaceUrl && isDm(entry)) {
+      await ack({ response_action: 'update', view: loadingView() });
+      await run(client, { id, entry, userId: body.user.id, language, viewId: view.id });
+      return;
+    }
+    await ack();
     if (entry) await run(client, { id, entry, userId: body.user.id, language, replaceUrl });
   });
 }

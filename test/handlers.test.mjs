@@ -26,7 +26,10 @@ function fakeClient({ replies, history, ephemeralError, historyError, tag } = {}
   return {
     calls,
     tag,
-    views: { open: async (a) => { calls.push(['open', a]); } },
+    views: {
+      open: async (a) => { calls.push(['open', a]); return { view: { id: 'V1' } }; },
+      update: async (a) => { calls.push(['update', a]); },
+    },
     chat: {
       postEphemeral: async (a) => {
         calls.push(['ephemeral', a]);
@@ -326,4 +329,41 @@ test('댓글이 없는 글도 결과는 그 글의 댓글 창 안에 둔다', as
   await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'No replies yet' }));
   const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
   assert.equal(eph.thread_ts, '9.0');
+});
+
+test('DM 에서 ⋯→번역은 맨 아래 메시지가 아니라 작은 창에 보여 준다', async () => {
+  const { app, prefs, responded } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient({ ephemeralError: 'channel_not_found' });
+  const body = { ...shortcutBody({ ts: '5.0', text: 'Morning brief' }), channel: { id: 'D1' } };
+  await shortcut(app, client, body);
+  const opened = client.calls.find((c) => c[0] === 'open')[1].view;
+  assert.match(JSON.stringify(opened.blocks), /번역 중/);
+  const updated = client.calls.find((c) => c[0] === 'update')[1];
+  assert.equal(updated.view_id, 'V1');
+  assert.match(JSON.stringify(updated.view.blocks), /번역-ko/);
+  assert.equal(JSON.stringify(updated.view.blocks).includes('retranslate'), false);
+  assert.equal(client.calls.some((c) => c[0] === 'ephemeral'), false);
+  assert.equal(responded.length, 0);
+});
+
+test('DM 에서 처음 언어를 고르면 그 창이 결과 창으로 바뀐다', async () => {
+  const { app, prefs, responded } = setup();
+  const client = fakeClient();
+  const body = { ...shortcutBody({ ts: '6.0', text: 'Hello' }), channel: { id: 'D1' } };
+  await shortcut(app, client, body);
+  const view = client.calls.find((c) => c[0] === 'open')[1].view;
+  let ackArg;
+  await app.handlers[`view:${PREF_CALLBACK_ID}`]({
+    ack: async (a) => { ackArg = a; },
+    body: { team: { id: 'T1' }, user: { id: 'U1' } },
+    view: { ...view, id: 'V9', state: { values: { lang: { lang: { selected_option: { value: 'ko' } } } } } },
+    client,
+  });
+  assert.equal(prefs.get('U1'), 'ko');
+  assert.equal(ackArg.response_action, 'update');
+  const updated = client.calls.find((c) => c[0] === 'update')[1];
+  assert.equal(updated.view_id, 'V9');
+  assert.match(JSON.stringify(updated.view.blocks), /번역-ko/);
+  assert.equal(responded.length, 0);
 });
