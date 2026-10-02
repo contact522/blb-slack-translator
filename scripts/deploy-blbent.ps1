@@ -16,12 +16,26 @@ function Fail($msg) {
   exit 1
 }
 
+# 콘솔 창은 Ctrl+V 붙여넣기가 안 되는 경우가 있어, 가려진 입력칸이 있는 작은 창으로 받는다.
+Add-Type -AssemblyName System.Windows.Forms
 function Read-Secret($label, $prefix) {
+  $hint = ''
   while ($true) {
-    $s = Read-Host $label -AsSecureString
-    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)).Trim()
-    if ($plain.StartsWith($prefix)) { return $plain }
-    Write-Host "  $prefix 로 시작하는 값이 아닙니다. 다시 붙여넣어 주세요." -ForegroundColor Yellow
+    $f = New-Object Windows.Forms.Form
+    $f.Text = 'BLB Translator 토큰 입력'; $f.Width = 520; $f.Height = 190; $f.TopMost = $true; $f.StartPosition = 'CenterScreen'
+    $l = New-Object Windows.Forms.Label
+    $l.Text = "$label`r`n복사한 값을 아래 칸에 Ctrl+V 로 붙여넣고 확인을 누르세요. $hint"; $l.SetBounds(12, 10, 480, 50)
+    $t = New-Object Windows.Forms.TextBox
+    $t.UseSystemPasswordChar = $true; $t.SetBounds(12, 65, 480, 24)
+    $b = New-Object Windows.Forms.Button
+    $b.Text = '확인'; $b.SetBounds(392, 100, 100, 30); $b.DialogResult = 'OK'
+    $f.Controls.AddRange(@($l, $t, $b)); $f.AcceptButton = $b
+    $f.Add_Shown({ $f.Activate(); $t.Focus() })
+    if ($f.ShowDialog() -ne 'OK') { Fail '입력을 취소했습니다.' }
+    $plain = $t.Text.Trim()
+    $f.Dispose()
+    if ($plain.StartsWith($prefix)) { Write-Host "  $label 입력됨"; return $plain }
+    $hint = "($prefix 로 시작하는 값이 아닙니다. 다시 복사해 주세요.)"
   }
 }
 
