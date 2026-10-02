@@ -114,9 +114,8 @@ export function registerHandlers(app, {
       await client.chat.postEphemeral({
         channel: entry.channel,
         user: userId,
-        // 스레드 답글이면 그 스레드 안에, 채널 글(댓글이 달린 원글 포함)이면 채널 화면에 보인다.
-        // 원글은 thread_ts 가 자기 ts 와 같아서, 그대로 넘기면 결과가 댓글 창 안에 숨는다.
-        thread_ts: entry.threadTs && entry.threadTs !== entry.ts ? entry.threadTs : undefined,
+        // 댓글이 달린 원글·댓글 답글이면 그 댓글 창 안에 보인다.
+        thread_ts: entry.threadTs ?? undefined,
         ...message,
       });
       return;
@@ -126,10 +125,10 @@ export function registerHandlers(app, {
         logger.warn(`결과 전달 실패: ${code}`);
         return;
       }
-      logger.info(`봇 없는 대화방이라 response_url 로 전달: ${code}`);
+      logger.warn(`봇으로 못 보내 response_url 로 전달: ${code}`);
     }
     try {
-      await respond(entry.responseUrl, { response_type: 'ephemeral', ...message });
+      await respond(entry.responseUrl, { response_type: 'ephemeral', thread_ts: entry.threadTs ?? undefined, ...message });
     } catch (err) {
       logger.warn(`결과 전달 실패: ${err.message}`);
     }
@@ -160,7 +159,8 @@ export function registerHandlers(app, {
     return {
       channel,
       ts: message.ts,
-      threadTs: message.thread_ts ?? null,
+      // 댓글이 달린 원글인데 thread_ts 가 빠져 오는 경우가 있어 reply_count 로도 판단한다.
+      threadTs: message.thread_ts ?? (message.reply_count > 0 ? message.ts : null),
       text: full.slice(0, MAX_SOURCE_CHARS),
       truncated: full.length > MAX_SOURCE_CHARS,
       responseUrl: responseUrl ?? null,

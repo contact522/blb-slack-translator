@@ -111,13 +111,22 @@ test('저장된 언어가 있으면 모달 없이 바로 번역하고, 스레드
   assert.match(text(eph), /1 earlier thread message/);
 });
 
-test('댓글이 달린 원글을 번역하면 결과가 댓글 창이 아니라 채널 화면에 보인다', async () => {
+test('댓글이 달린 원글을 번역하면 결과가 그 댓글 창 안에 보인다', async () => {
   const { app, prefs } = setup();
   prefs.set('U1', 'ko');
   const client = fakeClient({ replies: [] });
   await shortcut(app, client, shortcutBody({ ts: '1.0', thread_ts: '1.0', text: 'Daily report' }));
   const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
-  assert.equal(eph.thread_ts, undefined);
+  assert.equal(eph.thread_ts, '1.0');
+});
+
+test('thread_ts 없이 와도 댓글 수가 있으면 댓글 창 안에 보인다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient({ replies: [] });
+  await shortcut(app, client, shortcutBody({ ts: '1.0', reply_count: 2, text: 'Notice' }));
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.equal(eph.thread_ts, '1.0');
 });
 
 test('봇이 없는 대화방(DM)이면 response_url 로 나에게만 보낸다', async () => {
