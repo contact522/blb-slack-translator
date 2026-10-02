@@ -305,7 +305,7 @@ test('DM 읽기는 감사 기록을 남긴다', async () => {
   assert.ok(userTokens.log.some((l) => l.startsWith('read U1 dm D9')));
 });
 
-test('같은 메시지를 같은 언어로 다시 누르면 번역 API 를 다시 부르지 않는다', async () => {
+test('같은 사람이 같은 글을 다시 누르면 결과를 또 보내지 않고, 번역 API 도 다시 부르지 않는다', async () => {
   let count = 0;
   const { app, prefs } = setup({ translate: async (a) => { count += 1; return `번역-${a.targetCode}`; } });
   prefs.set('U1', 'ko');
@@ -315,8 +315,13 @@ test('같은 메시지를 같은 언어로 다시 누르면 번역 API 를 다�
   await shortcut(app, client, body);
   assert.equal(count, 1);
   const results = client.calls.filter((c) => c[0] === 'ephemeral');
-  assert.equal(results.length, 2);
-  assert.match(text(results[1][1]), /번역-ko/);
+  assert.equal(results.length, 1);
+  assert.match(text(results[0][1]), /번역-ko/);
+  // 다른 사람은 자기 결과를 받는다(번역은 저장된 것을 쓴다).
+  prefs.set('U2', 'ko');
+  await shortcut(app, client, { ...body, user: { id: 'U2' } });
+  assert.equal(client.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(count, 1);
   // 다른 언어나 고친 글은 새로 번역한다.
   prefs.set('U1', 'th');
   await shortcut(app, client, body);

@@ -27,6 +27,7 @@ const CACHE_MAX = 2000;
 // 같은 메시지·같은 언어는 다시 번역하지 않고 저장된 결과를 보여 준다(비용 0, 즉시).
 // 메모리에만 둔다(본문을 디스크에 쌓지 않는다). 재시작하면 비워진다. 글을 고치면 원문이 달라져 새로 번역한다.
 const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SENT_TTL_MS = 12 * 60 * 60 * 1000;
 
 // 스레드 앞선 메시지를 읽는다. 권한이 없거나 스레드가 아니면 빈 문맥으로 계속한다.
 export async function loadContext(client, meta) {
@@ -73,6 +74,8 @@ export function registerHandlers(app, {
   const recentReactions = new Map();
   // 번역기가 본인 토큰으로 방금 붙인 🌐 (그 반응 이벤트를 한 번 무시하기 위해). 키→시각.
   const selfReact = new Map();
+  // 누구에게 어느 글의 번역을 이미 보냈는지. 키(사람·대화방·글·언어)→시각.
+  const sentTo = new Map();
   const remember = (entry) => {
     const t = now();
     for (const [k, v] of sources) {
@@ -179,7 +182,24 @@ export function registerHandlers(app, {
   async function run(client, { id, entry, userId, language, replaceUrl, viewId }) {
     // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
     if (!viewId && !replaceUrl) await markTranslated(client, entry, userId);
+    // 같은 사람이 같은 글을 같은 언어로 이미 받았으면 다시 보내지 않는다(대표 요청: 중복 금지).
+    // 「나에게만 표시」는 새로고침하면 사라지므로, 12시간이 지나면 다시 보낼 수 있게 한다.
+    const sentKey = `${userId}:${doneKey(entry, language)}`; // 글을 고치면 원문 해시가 달라져 다시 보낸다
+    if (!viewId && !replaceUrl) {
+      const at = sentTo.get(sentKey);
+      if (at && now() - at < SENT_TTL_MS) {
+        trace(`[중복생략] ${entry.channel} ${entry.ts} by=${userId}`);
+        return;
+      }
+    }
     const out = await translateText(client, userId, entry, language);
+    if (out.status === 'done' && !viewId && !replaceUrl) {
+      sentTo.set(sentKey, now());
+      for (const [k, t] of sentTo) {
+        if (sentTo.size <= CACHE_MAX && now() - t < SENT_TTL_MS) break;
+        sentTo.delete(k);
+      }
+    }
     const message = resultMessage({ id, language, truncated: entry.truncated, ...out });
     // DM 에서 아직 연결 안 한 사람이면, 결과 아래에 「🌐 연결」 버튼을 붙인다.
     // 연결하면 다음부터 이 DM 에서 🌐 한 번으로 번역된다(반응은 DM 에선 연결자만 온다).
