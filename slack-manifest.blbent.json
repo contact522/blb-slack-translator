@@ -14,7 +14,12 @@
         "callback_id": "translate_message",
         "description": "이 메시지를 내 언어로 번역해 나에게만 보여 줍니다"
       }
-    ]
+    ],
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": true
+    }
   },
   "oauth_config": {
     "scopes": {
@@ -27,7 +32,8 @@
         "channels:read",
         "channels:join",
         "users:read",
-        "reactions:write"
+        "reactions:write",
+        "im:write"
       ],
       "user": [
         "im:history",

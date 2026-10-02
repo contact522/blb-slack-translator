@@ -6,14 +6,15 @@ import path from 'node:path';
 import { registerHandlers, loadContext, SHORTCUT_ID } from '../src/handlers.mjs';
 import { PREF_CALLBACK_ID, ACTION_RETRANSLATE, ACTION_CHANGE_DEFAULT } from '../src/views.mjs';
 import { createRateLimiter } from '../src/core.mjs';
-import { createMemoryPrefStore, createPrefStore } from '../src/prefs.mjs';
+import { createMemoryPrefStore, createPrefStore, createMemorySavedStore } from '../src/prefs.mjs';
 import { createMemoryUserTokenStore } from '../src/userTokens.mjs';
 
 function fakeApp() {
-  const handlers = {};
+  const handlers = { __posted: [] };
   return {
     handlers,
-    client: { constructor: class {} },
+    posted: [],
+    client: { constructor: class {}, chat: { postMessage: async (a) => { handlers.__posted.push(a); } } },
     shortcut: (id, fn) => { handlers[`shortcut:${id}`] = fn; },
     action: (id, fn) => { handlers[`action:${id}`] = fn; },
     view: (id, fn) => { handlers[`view:${id}`] = fn; },
@@ -55,7 +56,7 @@ function fakeClient({ replies, history, ephemeralError, historyError, tag } = {}
 const logger = { info() {}, warn() {}, error() {} };
 const baseConfig = { teamId: 'T1', paidApiEnabled: true, reaction: 'globe_with_meridians' };
 
-function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore(), userTokens = null, userClients = {} } = {}) {
+function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore(), userTokens = null, userClients = {}, saved = null } = {}) {
   const app = fakeApp();
   const responded = [];
   registerHandlers(app, {
@@ -64,6 +65,7 @@ function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`,
     limiter: createRateLimiter({ perUserPerMinute: 5, perDay: 100 }),
     logger,
     prefs,
+    saved,
     userTokens,
     makeClient: (token) => userClients[token],
     respond: async (url, payload) => { responded.push({ url, payload }); },
@@ -439,4 +441,24 @@ test('사람이 🌐 를 껐다 다시 누르면 다시 번역 요청으로 받�
   await fire('Ev2'); // 재전송 → 무시
   const n = userClient.calls.filter((c) => c[0] === 'ephemeral').length;
   assert.ok(n <= 2);
+});
+
+test('번역 저장본을 그 사람과 번역기의 1:1 대화방에 원글 링크와 함께 한 번만 남긴다, 고친 글은 새로 남긴다', async () => {
+  const saved = createMemorySavedStore();
+  const { app, prefs } = setup({ saved });
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  client.chat.getPermalink = async () => ({ permalink: 'https://x.slack.com/archives/C1/p7' });
+  const body = shortcutBody({ ts: '7.0', text: 'Daily report' });
+  await shortcut(app, client, body);
+  const posted = app.handlers.__posted;
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].channel, 'U1');
+  assert.match(JSON.stringify(posted[0].blocks), /원문 보기/);
+  assert.match(JSON.stringify(posted[0].blocks), /번역-ko/);
+  assert.equal(JSON.stringify(posted[0].blocks).includes('retranslate'), false);
+  await shortcut(app, client, body);
+  assert.equal(posted.length, 1);
+  await shortcut(app, client, shortcutBody({ ts: '7.0', text: 'Daily report (edited)' }));
+  assert.equal(posted.length, 2);
 });

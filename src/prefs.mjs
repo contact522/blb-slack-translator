@@ -36,3 +36,33 @@ export function createMemoryPrefStore() {
     size: () => data.size,
   };
 }
+
+// 「이 사람에게 이 글(이 원문·이 언어)의 번역 저장본을 이미 남겼다」 표시. 키만 저장한다(본문 없음).
+// 재배포해도 같은 저장본을 또 남기지 않도록 볼륨에 둔다.
+export function createSavedStore(file, max = 20000) {
+  let keys = [];
+  try {
+    keys = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    keys = [];
+  }
+  const set = new Set(keys);
+  return {
+    has: (k) => set.has(k),
+    add(k) {
+      if (set.has(k)) return;
+      set.add(k);
+      keys.push(k);
+      if (keys.length > max) set.delete(keys.shift());
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(keys));
+      fs.renameSync(tmp, file);
+    },
+  };
+}
+
+export function createMemorySavedStore() {
+  const set = new Set();
+  return { has: (k) => set.has(k), add: (k) => { set.add(k); } };
+}

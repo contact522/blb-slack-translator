@@ -27,7 +27,8 @@ const CACHE_MAX = 2000;
 // 같은 메시지·같은 언어는 다시 번역하지 않고 저장된 결과를 보여 준다(비용 0, 즉시).
 // 메모리에만 둔다(본문을 디스크에 쌓지 않는다). 재시작하면 비워진다. 글을 고치면 원문이 달라져 새로 번역한다.
 const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const SENT_TTL_MS = 12 * 60 * 60 * 1000;
+// 방금 받은 결과를 실수로 다시 누른 경우만 막는다. 결과는 1:1 대화방에 저장본이 남으므로 길게 막을 필요가 없다.
+const SENT_TTL_MS = 10 * 60 * 1000;
 
 // 스레드 앞선 메시지를 읽는다. 권한이 없거나 스레드가 아니면 빈 문맥으로 계속한다.
 export async function loadContext(client, meta) {
@@ -63,6 +64,7 @@ function connectPrompt(installUrl) {
 
 export function registerHandlers(app, {
   config, translate, limiter, logger, prefs,
+  saved = null,
   userTokens = null,
   makeClient = (token) => new (app.client.constructor)(token),
   respond = postJson, now = () => Date.now(),
@@ -183,7 +185,7 @@ export function registerHandlers(app, {
     // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
     if (!viewId && !replaceUrl) await markTranslated(client, entry, userId);
     // 같은 사람이 같은 글을 같은 언어로 이미 받았으면 다시 보내지 않는다(대표 요청: 중복 금지).
-    // 「나에게만 표시」는 새로고침하면 사라지므로, 12시간이 지나면 다시 보낼 수 있게 한다.
+    // 「나에게만 표시」는 새로고침하면 사라지므로 10분만 막는다(그 뒤엔 다시 누르면 다시 보낸다).
     const sentKey = `${userId}:${doneKey(entry, language)}`; // 글을 고치면 원문 해시가 달라져 다시 보낸다
     if (!viewId && !replaceUrl) {
       const at = sentTo.get(sentKey);
@@ -218,6 +220,35 @@ export function registerHandlers(app, {
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
       await deliver(client, entry, userId, message);
+      if (out.status === 'done') await saveCopy(client, entry, userId, language, message);
+    }
+  }
+
+  // 번역 저장본: 「나에게만 표시」는 새로고침하면 사라지므로, 그 사람과 번역기의 1:1 대화방에도 남긴다(대표 요청).
+  // 원글 링크를 붙인다. 같은 글·같은 원문·같은 언어는 한 번만 남긴다(글을 고치면 새로 남긴다).
+  async function saveCopy(client, entry, userId, language, message) {
+    if (!saved) return;
+    const key = `${userId}:${doneKey(entry, language)}`;
+    if (saved.has(key)) return;
+    let link = null;
+    try {
+      link = (await client.chat.getPermalink({ channel: entry.channel, message_ts: entry.ts }))?.permalink ?? null;
+    } catch {
+      link = null;
+    }
+    const where = isDm(entry) ? 'DM' : `<#${entry.channel}>`;
+    const head = { type: 'context', elements: [{ type: 'mrkdwn', text: `📌 저장본 · ${where}${link ? ` · <${link}|원문 보기 / Original>` : ''}` }] };
+    try {
+      await app.client.chat.postMessage({
+        channel: userId,
+        text: message.text,
+        blocks: [head, ...resultView(message).blocks],
+        unfurl_links: false,
+      });
+      saved.add(key);
+      trace(`[저장] ${entry.channel} ${entry.ts} for=${userId}`);
+    } catch (err) {
+      logger.warn(`저장본 남기기 실패: ${err?.data?.error ?? err.message}`);
     }
   }
 

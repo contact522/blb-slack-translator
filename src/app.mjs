@@ -5,7 +5,7 @@ import { loadConfig } from './config.mjs';
 import { createRateLimiter } from './core.mjs';
 import { createOpenAITranslator } from './translator.mjs';
 import { registerHandlers } from './handlers.mjs';
-import { createPrefStore } from './prefs.mjs';
+import { createPrefStore, createSavedStore } from './prefs.mjs';
 import { createUserTokenStore } from './userTokens.mjs';
 import { createOAuthRoutes } from './oauth.mjs';
 import { registerAutoJoin, joinAllPublicChannels } from './autojoin.mjs';
@@ -39,6 +39,7 @@ socket.on('disconnected', () => {
 });
 
 const prefs = createPrefStore(path.join(config.dataDir, 'prefs.json'));
+const saved = createSavedStore(path.join(config.dataDir, 'saved.json'));
 
 // DM 🌐 번역이 켜져 있으면 사용자 토큰 저장소와 연결(OAuth) 경로를 준비한다.
 let userTokens = null;
@@ -56,6 +57,7 @@ registerHandlers(app, {
   config,
   logger,
   prefs,
+  saved,
   userTokens,
   makeClient: (token) => new webApi.WebClient(token),
   limiter: createRateLimiter({ perUserPerMinute: config.perUserPerMinute, perDay: config.perDay }),
