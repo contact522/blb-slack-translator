@@ -1,6 +1,6 @@
 // OpenAI Responses API 호출. PAID_API_ENABLED=true 일 때만 쓰인다.
 // Lark 번역봇(blb-lark-translator)과 같은 방식: 구조화 출력, 오염된 출력 감지 후 1회 재시도, 429 재시도.
-import { buildTranslationPrompt } from './core.mjs';
+import { buildTranslationPrompt, isWrongScript } from './core.mjs';
 
 export class TranslationError extends Error {}
 
@@ -91,7 +91,7 @@ export function createOpenAITranslator({
       } catch {
         out = '';
       }
-      if (!isSuspiciousTranslation(text, out)) return out;
+      if (!isSuspiciousTranslation(text, out) && !isWrongScript(out, targetCode)) return out;
     }
     throw new TranslationError('rejected output');
   };

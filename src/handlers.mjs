@@ -6,7 +6,7 @@
 // - 🌐 반응: 봇이 들어가 있는 채널에서 같은 번역을 한다 (마우스 올림 아이콘 줄에서 한 번 클릭).
 // - 결과 아래 「다른 언어로 보기」는 이번만, 「기본 언어」는 저장값을 바꾼다.
 import crypto from 'node:crypto';
-import { extractMessageText, selectContext, findLanguage } from './core.mjs';
+import { extractMessageText, selectContext, findLanguage, isAlreadyIn } from './core.mjs';
 import {
   resultMessage,
   expiredMessage,
@@ -27,8 +27,8 @@ const CACHE_MAX = 2000;
 // 같은 메시지·같은 언어는 다시 번역하지 않고 저장된 결과를 보여 준다(비용 0, 즉시).
 // 메모리에만 둔다(본문을 디스크에 쌓지 않는다). 재시작하면 비워진다. 글을 고치면 원문이 달라져 새로 번역한다.
 const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-// 방금 받은 결과를 실수로 다시 누른 경우만 막는다. 결과는 1:1 대화방에 저장본이 남으므로 길게 막을 필요가 없다.
-const SENT_TTL_MS = 10 * 60 * 1000;
+// 방금 받은 결과를 실수로 연달아 누른 경우만 막는다(10초). 그 뒤 재요청은 저장된 번역(done)을 다시 보낸다(API 재호출 없음).
+const SENT_TTL_MS = 10_000;
 
 // 스레드 앞선 메시지를 읽는다. 권한이 없거나 스레드가 아니면 빈 문맥으로 계속한다.
 export async function loadContext(client, meta) {
@@ -127,6 +127,10 @@ export function registerHandlers(app, {
     if (!config.paidApiEnabled) {
       return { status: 'done', result: '_(미리보기 / Preview)_ 유료 번역 API가 꺼져 있어 실제 번역은 하지 않았습니다. / Paid translation API is off; nothing was translated.' };
     }
+    // 원문이 이미 받을 언어면 번역 API 를 부르지 않고 원문을 그대로 보인다.
+    if (isAlreadyIn(entry.text, language)) {
+      return { status: 'done', result: entry.text, note: '원문이 이미 이 언어라 그대로 보여 드립니다. / The message is already in this language.' };
+    }
     const key = doneKey(entry, language);
     const saved = reuse(key);
     if (saved) return saved;
@@ -185,7 +189,7 @@ export function registerHandlers(app, {
     // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
     if (!viewId && !replaceUrl && !fromReaction) await markTranslated(client, entry, userId);
     // 같은 사람이 같은 글을 같은 언어로 이미 받았으면 다시 보내지 않는다(대표 요청: 중복 금지).
-    // 「나에게만 표시」는 새로고침하면 사라지므로 10분만 막는다(그 뒤엔 다시 누르면 다시 보낸다).
+    // 「나에게만 표시」는 새로고침하면 사라지므로 10초만 막는다(그 뒤엔 다시 누르면 저장된 번역을 다시 보낸다).
     const sentKey = `${userId}:${doneKey(entry, language)}`; // 글을 고치면 원문 해시가 달라져 다시 보낸다
     if (!viewId && !replaceUrl) {
       const at = sentTo.get(sentKey);
@@ -364,14 +368,14 @@ export function registerHandlers(app, {
 
     // 봇 이벤트와 사용자 이벤트가 둘 다 구독돼 있으면, 봇이 든 채널에서 연결된 사람이 반응하면
     // 같은 반응이 두 번 온다. 짧은 시간 안의 같은 (대화방·메시지·사람·이모지)는 한 번만 처리.
-    // - 봇·사용자 이벤트 동시 도착: 같은 (대화방·메시지·사람·이모지)는 15초 안에 한 번만.
+    // - 봇·사용자 이벤트 동시 도착: 같은 (대화방·메시지·사람·이모지)는 10초 안에 한 번만.
     // - Slack 재전송: 같은 event_id 는 1시간 안에 한 번만(늦게 다시 와도 막는다).
     // - 번역기가 본인 토큰으로 붙인 🌐: 그 직후 한 번만 무시(selfReact). 사람이 🌐 를 껐다 다시 누르면 번역한다.
     const dedupKey = `${channel}:${ts}:${event.user}:${event.reaction}`;
     const eventKey = body?.event_id ? `e:${body.event_id}` : null;
     const t0 = now();
     for (const [k, t] of recentReactions) {
-      if (t0 - t > (k.startsWith('e:') ? 60 * 60 * 1000 : 15_000)) recentReactions.delete(k);
+      if (t0 - t > (k.startsWith('e:') ? 60 * 60 * 1000 : 10_000)) recentReactions.delete(k);
     }
     if (eventKey && recentReactions.has(eventKey)) return;
     if (eventKey) recentReactions.set(eventKey, t0);

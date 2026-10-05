@@ -56,7 +56,7 @@ function fakeClient({ replies, history, ephemeralError, historyError, tag } = {}
 const logger = { info() {}, warn() {}, error() {} };
 const baseConfig = { teamId: 'T1', paidApiEnabled: true, reaction: 'globe_with_meridians' };
 
-function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore(), userTokens = null, userClients = {}, saved = null } = {}) {
+function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`, prefs = createMemoryPrefStore(), userTokens = null, userClients = {}, saved = null, now } = {}) {
   const app = fakeApp();
   const responded = [];
   registerHandlers(app, {
@@ -70,6 +70,7 @@ function setup({ config = {}, translate = async (a) => `번역-${a.targetCode}`,
     makeClient: (token) => userClients[token],
     respond: async (url, payload) => { responded.push({ url, payload }); },
     trace: () => {},
+    ...(now ? { now } : {}),
   });
   return { app, prefs, responded };
 }
@@ -186,12 +187,12 @@ test('기본 언어 바꾸기는 저장값을 바꾸고 지금 결과도 새 언
   await app.handlers[`view:${PREF_CALLBACK_ID}`]({
     ack: async () => {},
     body: { team: { id: 'T1' }, user: { id: 'U1' } },
-    view: { ...view, state: { values: { lang: { lang: { selected_option: { value: 'ko' } } } } } },
+    view: { ...view, state: { values: { lang: { lang: { selected_option: { value: 'en' } } } } } },
     client,
   });
-  assert.equal(prefs.get('U1'), 'ko');
+  assert.equal(prefs.get('U1'), 'en');
   assert.equal(responded.at(-1).url, 'https://resp/3');
-  assert.match(text(responded.at(-1).payload), /번역-ko/);
+  assert.match(text(responded.at(-1).payload), /번역-en/);
 });
 
 test('🌐 반응을 달면 그 메시지를 찾아 번역하고, 다른 반응은 무시한다', async () => {
@@ -329,6 +330,30 @@ test('같은 사람이 같은 글을 다시 누르면 결과를 또 보내지 �
   await shortcut(app, client, body);
   await shortcut(app, client, shortcutBody({ ts: '7.0', text: 'Daily report (edited)' }));
   assert.equal(count, 3);
+});
+
+test('같은 사람·같은 글 🌐 는 10초 안에만 막고, 그 뒤 재요청은 저장된 번역을 다시 보낸다(API 재호출 없음)', async () => {
+  let count = 0;
+  let t = 1_000_000;
+  const { app, prefs } = setup({ translate: async (a) => { count += 1; return `번역-${a.targetCode}`; }, now: () => t });
+  prefs.set('U2', 'th');
+  const client = fakeClient({ history: [{ ts: '5.0', text: '내일 배송' }] });
+  const fire = (eventId) => app.handlers['event:reaction_added']({
+    body: { team_id: 'T1', event_id: eventId },
+    event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C9', ts: '5.0' } },
+    client,
+  });
+  const sent = () => client.calls.filter((c) => c[0] === 'ephemeral').length;
+  await fire('Ev1');
+  assert.equal(sent(), 1);
+  t += 5_000;
+  await fire('Ev2'); // 10초 안 → 중복생략
+  assert.equal(sent(), 1);
+  t += 6_000;
+  await fire('Ev3'); // 10초 지남 → 저장된 번역 전달
+  assert.equal(sent(), 2);
+  assert.match(text(client.calls.filter((c) => c[0] === 'ephemeral')[1][1]), /번역-th/);
+  assert.equal(count, 1);
 });
 
 test('댓글이 없는 글도 결과는 그 글의 댓글 창 안에 둔다', async () => {
@@ -483,4 +508,16 @@ test('🌐 는 누른 사람 이름으로만: 🌐 로 요청하면 번역기가
   });
   assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral').length, 2);
   assert.equal(botClient.calls.filter((c) => c[0] === 'react').length, 0);
+});
+
+test('원문이 이미 내 언어면 번역 API 를 부르지 않고 원문을 그대로 보인다', async () => {
+  let count = 0;
+  const { app, prefs } = setup({ translate: async () => { count += 1; return 'Xin chào'; } });
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '8.0', text: '[공지] BLB 시스템 이전 안내 (TH/VN 12:30)' }));
+  assert.equal(count, 0);
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.match(text(eph), /BLB 시스템 이전 안내/);
+  assert.match(text(eph), /already in this language/);
 });

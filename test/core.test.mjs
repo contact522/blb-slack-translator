@@ -71,3 +71,19 @@ test('호출 제한은 사용자별 분당, 전체 일일 한도를 지킨다', 
   t += 24 * 3600 * 1000;
   assert.equal(lim.check('U1').ok, true);
 });
+
+test('원문이 이미 받을 언어인지 글자 체계로 알아본다(한국어·태국어만, 중국어·라틴 문자는 판단 안 함)', async () => {
+  const { isAlreadyIn, isWrongScript } = await import('../src/core.mjs');
+  const notice = '[공지] 10/5(월) BLB 시스템 이전 및 점검 안내\n- 14:30 (TH/VN 12:30, MY 13:30): 기존 시스템 입력 중지\n접속 주소: <https://blbsaas.com|blbsaas.com>';
+  assert.equal(isAlreadyIn(notice, 'ko'), true);
+  assert.equal(isAlreadyIn(notice, 'th'), false);
+  assert.equal(isAlreadyIn('Daily report', 'ko'), false);
+  assert.equal(isAlreadyIn('สวัสดีครับ', 'th'), true);
+  assert.equal(isAlreadyIn('你好', 'zh-Hans'), false);
+  assert.equal(isAlreadyIn('Xin chào', 'vi'), false);
+  assert.equal(isAlreadyIn(':smile: 123', 'ko'), false);
+  // 한국어로 받을 결과가 베트남어면 잘못된 출력
+  assert.equal(isWrongScript('[Thông báo] Hướng dẫn chuyển đổi hệ thống BLB', 'ko'), true);
+  assert.equal(isWrongScript('[공지] BLB 시스템 이전 안내', 'ko'), false);
+  assert.equal(isWrongScript('Hello', 'vi'), false);
+});

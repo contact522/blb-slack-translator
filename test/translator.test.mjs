@@ -67,3 +67,13 @@ test('설정 검증: 유료 API 기본값은 꺼짐, 켜면 키가 필요하다'
   assert.equal(bad.errors.length, 2);
   assert.ok(bad.errors.every((e) => !e.includes('xapp-1')));
 });
+
+test('한국어로 받을 결과가 다른 언어 글자로만 오면 다시 시도하고, 그래도 그러면 실패로 본다', async () => {
+  const outs = ['[Thông báo] Hướng dẫn', '[공지] 안내'];
+  let calls = 0;
+  const translate = createOpenAITranslator({ apiKey: 'k', model: 'm', fetchImpl: async () => ok(outs[calls++]) });
+  assert.equal(await translate({ text: 'Notice', targetCode: 'ko', context: [] }), '[공지] 안내');
+  assert.equal(calls, 2);
+  const bad = createOpenAITranslator({ apiKey: 'k', model: 'm', fetchImpl: async () => ok('Xin chào') });
+  await assert.rejects(bad({ text: 'Hello', targetCode: 'ko', context: [] }), TranslationError);
+});

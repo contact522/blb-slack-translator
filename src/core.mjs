@@ -13,6 +13,33 @@ export function findLanguage(code) {
   return LANGUAGES.find((l) => l.code === code) ?? null;
 }
 
+// 글자 체계로 알아볼 수 있는 언어만. 베트남어·영어는 같은 라틴 문자라 구분하지 않는다.
+const SCRIPTS = { ko: /\p{Script=Hangul}/u, th: /\p{Script=Thai}/u, 'zh-Hans': /\p{Script=Han}/u, 'zh-Hant': /\p{Script=Han}/u };
+
+// 글자 중 그 언어 글자 체계의 비율. 알아볼 수 없는 언어이거나 글자가 없으면 null.
+export function scriptShare(text, code) {
+  const re = SCRIPTS[code];
+  if (!re) return null;
+  const plain = String(text ?? '').replace(/<[^>]*>|https?:\/\/\S+|:[a-z0-9_+-]+:/gi, '');
+  const letters = plain.match(/\p{L}/gu) ?? [];
+  if (!letters.length) return null;
+  return letters.filter((ch) => re.test(ch)).length / letters.length;
+}
+
+// 원문이 이미 받을 언어인가. 같은 언어로 「번역」시키면 모델이 엉뚱한 언어를 내놓은 적이 있다(2026-10-05, 한국어 공지→베트남어).
+// 간체·번체는 글자로 구분이 안 되고 서로 바꿔 줘야 하므로 제외한다.
+export function isAlreadyIn(text, code) {
+  if (code === 'zh-Hans' || code === 'zh-Hant') return false;
+  const share = scriptShare(text, code);
+  return share !== null && share >= 0.5;
+}
+
+// 번역 결과에 받을 언어의 글자가 거의 없으면 잘못된 출력으로 본다.
+export function isWrongScript(translated, code) {
+  const share = scriptShare(translated, code);
+  return share !== null && share < 0.2;
+}
+
 // Slack 메시지에서 번역할 본문을 꺼낸다. text 가 비어 있으면 첨부의 fallback 을 쓴다.
 export function extractMessageText(message) {
   if (!message) return '';
