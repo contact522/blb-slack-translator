@@ -87,3 +87,13 @@ test('원문이 이미 받을 언어인지 글자 체계로 알아본다(한국�
   assert.equal(isWrongScript('[공지] BLB 시스템 이전 안내', 'ko'), false);
   assert.equal(isWrongScript('Hello', 'vi'), false);
 });
+
+test('본문의 파일 ID(캔버스 등)는 files 의 제목·링크로 바꾸고, 정보가 없으면 그대로 둔다', () => {
+  const message = {
+    text: '자료를 정리했습니다.\nF0C716UUJ3U\n확인 부탁드립니다',
+    files: [{ id: 'F0C716UUJ3U', title: 'YOUNGWONHEE 자료 모음 (최신본)', permalink: 'https://x.slack.com/docs/T1/F0C716UUJ3U' }],
+  };
+  assert.equal(extractMessageText(message), '자료를 정리했습니다.\n<https://x.slack.com/docs/T1/F0C716UUJ3U|YOUNGWONHEE 자료 모음 (최신본)>\n확인 부탁드립니다');
+  assert.equal(extractMessageText({ text: 'F0C716UUJ3U' }), 'F0C716UUJ3U');
+  assert.equal(extractMessageText({ text: 'FAQ FINALIZED', files: message.files }), 'FAQ FINALIZED');
+});

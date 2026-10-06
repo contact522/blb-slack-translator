@@ -86,6 +86,7 @@ async function shortcut(app, client, body = shortcutBody()) {
 }
 
 const text = (payload) => JSON.stringify(payload.blocks);
+// 아래 개수 검사는 댓글 창 안 결과만 센다(원글이면 채널의 글 아래에도 하나 더 간다).
 
 test('처음 쓰는 사람은 언어 고르기 모달이 뜨고, 저장하면 바로 번역해 대화 안에 보낸다', async () => {
   const { app, prefs } = setup();
@@ -317,13 +318,13 @@ test('같은 사람이 같은 글을 다시 누르면 결과를 또 보내지 �
   await shortcut(app, client, body);
   await shortcut(app, client, body);
   assert.equal(count, 1);
-  const results = client.calls.filter((c) => c[0] === 'ephemeral');
+  const results = client.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts);
   assert.equal(results.length, 1);
   assert.match(text(results[0][1]), /번역-ko/);
   // 다른 사람은 자기 결과를 받는다(번역은 저장된 것을 쓴다).
   prefs.set('U2', 'ko');
   await shortcut(app, client, { ...body, user: { id: 'U2' } });
-  assert.equal(client.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(client.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length, 2);
   assert.equal(count, 1);
   // 다른 언어나 고친 글은 새로 번역한다.
   prefs.set('U1', 'th');
@@ -343,7 +344,7 @@ test('같은 사람·같은 글 🌐 는 10초 안에만 막고, 그 뒤 재요�
     event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C9', ts: '5.0' } },
     client,
   });
-  const sent = () => client.calls.filter((c) => c[0] === 'ephemeral').length;
+  const sent = () => client.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length;
   await fire('Ev1');
   assert.equal(sent(), 1);
   t += 5_000;
@@ -434,7 +435,7 @@ test('번역하면 원글에 🌐 를 붙이고, 그 🌐 가 다시 번역 요�
   assert.deepEqual(react, { channel: 'D9', timestamp: '5.0', name: 'globe_with_meridians' });
   // 방금 붙인 🌐 의 반응 이벤트는 무시
   await dmReaction(app, botClient, 'U1', 'D9', '5.0');
-  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral').length, 1);
+  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length, 1);
   // 번역기 자신이 붙인 🌐 도 무시
   await app.handlers['event:reaction_added']({
     body: { team_id: 'T1' },
@@ -460,11 +461,11 @@ test('사람이 🌐 를 껐다 다시 누르면 다시 번역 요청으로 받�
     client: botClient,
   });
   await fire('Ev1'); // 번역기가 붙인 🌐 의 이벤트 → 무시
-  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral').length, 1);
+  assert.equal(userClient.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length, 1);
   await new Promise((r) => setTimeout(r, 5));
   await fire('Ev2'); // 사람이 껐다 다시 누름 → 번역 (15초 창 안이지만 다른 반응이라 키는 같음)
   await fire('Ev2'); // 재전송 → 무시
-  const n = userClient.calls.filter((c) => c[0] === 'ephemeral').length;
+  const n = userClient.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length;
   assert.ok(n <= 2);
 });
 
@@ -506,7 +507,7 @@ test('🌐 는 누른 사람 이름으로만: 🌐 로 요청하면 번역기가
     event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C1', ts: '3.0' } },
     client: botClient,
   });
-  assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral' && c[1].thread_ts).length, 2);
   assert.equal(botClient.calls.filter((c) => c[0] === 'react').length, 0);
 });
 
@@ -520,4 +521,27 @@ test('원문이 이미 내 언어면 번역 API 를 부르지 않고 원문을 �
   const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
   assert.match(text(eph), /BLB 시스템 이전 안내/);
   assert.match(text(eph), /already in this language/);
+});
+
+test('원글을 번역하면 결과를 댓글 창 안과 채널의 글 아래 둘 다에 넣고, 댓글을 번역하면 댓글 창 안에만 넣는다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'Top post' }));
+  let eph = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
+  assert.deepEqual(eph.map((e) => e.thread_ts), ['9.0', undefined]);
+  assert.ok(eph.every((e) => /번역-ko/.test(text(e))));
+  client.calls.length = 0;
+  await shortcut(app, client, shortcutBody({ ts: '9.5', thread_ts: '9.0', text: 'A reply' }));
+  eph = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
+  assert.deepEqual(eph.map((e) => e.thread_ts), ['9.0']);
+});
+
+test('연결 안 한 사람이 ⋯→번역하면 원글에 번역기 이름의 🌐 를 붙이지 않는다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'Top post' }));
+  assert.equal(client.calls.some((c) => c[0] === 'react'), false);
+  assert.equal(client.calls.some((c) => c[0] === 'ephemeral'), true);
 });

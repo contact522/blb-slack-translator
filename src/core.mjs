@@ -40,11 +40,23 @@ export function isWrongScript(translated, code) {
   return share !== null && share < 0.2;
 }
 
+// 캔버스 등 첨부 파일은 text 에 파일 ID(F0C716UUJ3U)만 남는다. Slack 화면은 카드로 그리지만 결과에는 ID 가 그대로 보이므로
+// 메시지의 files 에서 제목·링크를 찾아 <링크|제목> 으로 바꾼다. 정보가 없으면 그대로 둔다.
+function linkFiles(text, files) {
+  if (!Array.isArray(files) || !files.length) return text;
+  return text.replace(/\bF[0-9A-Z]{8,}\b/g, (id) => {
+    const f = files.find((x) => x?.id === id);
+    const title = (f?.title || f?.name || '').replace(/[<>|]/g, '');
+    if (!f?.permalink || !title) return id;
+    return `<${f.permalink}|${title}>`;
+  });
+}
+
 // Slack 메시지에서 번역할 본문을 꺼낸다. text 가 비어 있으면 첨부의 fallback 을 쓴다.
 export function extractMessageText(message) {
   if (!message) return '';
   const text = typeof message.text === 'string' ? message.text.trim() : '';
-  if (text) return text;
+  if (text) return linkFiles(text, message.files);
   const parts = (message.attachments ?? [])
     .map((a) => a.fallback || a.text || '')
     .filter(Boolean);

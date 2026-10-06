@@ -157,6 +157,13 @@ export function registerHandlers(app, {
     }
   }
 
+  // 번역 결과: 댓글 창 안에 넣고, 원글(댓글이 아닌 글)이면 채널의 그 글 아래에도 넣는다(대표 요청).
+  // 댓글을 번역한 경우는 댓글 창 안에만 둔다.
+  async function deliverResult(client, entry, userId, message) {
+    await deliver(client, entry, userId, message);
+    if (!entry.isReply) await deliver(client, { ...entry, threadTs: null, responseUrl: null }, userId, message);
+  }
+
   // 대화 안에 「나에게만 표시」로 보낸다. 봇이 없는 대화방(DM 등)이면 response_url 로 보낸다.
   async function deliver(client, entry, userId, message) {
     try {
@@ -223,7 +230,7 @@ export function registerHandlers(app, {
       await respond(replaceUrl, { replace_original: true, response_type: 'ephemeral', ...message })
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
-      await deliver(client, entry, userId, message);
+      await deliverResult(client, entry, userId, message);
       if (out.status === 'done') await saveCopy(client, entry, userId, language, message);
     }
   }
@@ -257,12 +264,13 @@ export function registerHandlers(app, {
   }
 
   // 번역한 글에 🌐 를 붙인다(대표 요청). 결과는 댓글 창 안이라 글 아래 표시가 안 생기기 때문.
-  // 누른 사람 이름으로 붙인다(대표 요청: 누른 사람만 보이게). 연결(본인 토큰)한 사람이면 채널·DM 모두 본인 이름,
-  // 연결 안 한 사람은 채널에서만 번역기 이름으로 붙는다. 🌐 로 요청한 경우는 이미 본인 🌐 가 있어 붙이지 않는다(run).
-  // 본인 토큰으로 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 한 번 무시 표시를 먼저 남긴다(봇 반응은 핸들러가 거른다).
+  // 누른 사람 이름으로만 붙인다(대표 요청). 연결(본인 토큰)한 사람만 붙고, 연결 안 한 사람은 붙이지 않는다
+  // (번역기 이름의 🌐 는 붙이지 않는다, 대표 요청 2026-10-06). 🌐 로 요청한 경우는 이미 본인 🌐 가 있어 붙이지 않는다(run).
+  // 본인 토큰으로 붙인 🌐 가 다시 번역 요청으로 돌아오지 않도록 한 번 무시 표시를 먼저 남긴다.
   async function markTranslated(client, entry, userId) {
     const token = userTokens?.get(userId);
-    const reactor = byUser.has(client) ? client : (token ? asUser(token) : client);
+    const reactor = byUser.has(client) ? client : (token ? asUser(token) : null);
+    if (!reactor) return;
     const selfKey = `self:${entry.channel}:${entry.ts}:${userId}:${config.reaction}`;
     if (byUser.has(reactor)) selfReact.set(selfKey, now());
     try {
@@ -282,6 +290,8 @@ export function registerHandlers(app, {
       ts: message.ts,
       // 결과는 항상 그 글의 댓글 창 안에 둔다(대표 요청). 댓글이 없는 글도 자기 ts 를 스레드로 쓴다.
       threadTs: message.thread_ts ?? message.ts ?? null,
+      // 댓글(스레드 답글)인가. 원글이면 결과를 채널의 글 아래에도 넣는다(deliverResult).
+      isReply: Boolean(message.thread_ts && message.thread_ts !== message.ts),
       text: full.slice(0, MAX_SOURCE_CHARS),
       truncated: full.length > MAX_SOURCE_CHARS,
       responseUrl: responseUrl ?? null,
