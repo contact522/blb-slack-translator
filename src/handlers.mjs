@@ -146,8 +146,12 @@ export function registerHandlers(app, {
     const { context, errorCode } = await loadContext(client, entry);
     if (errorCode) logger.info(`문맥 읽기 생략: ${errorCode}`);
     try {
-      const result = await translate({ text: entry.text, targetCode: language, context });
-      const note = context.length ? `스레드 앞 메시지 ${context.length}개를 참고했습니다. / Used ${context.length} earlier thread message(s).` : null;
+      const raw = await translate({ text: entry.text, targetCode: language, context });
+      const result = typeof raw === 'string' ? raw : raw.translation;
+      const notes = [];
+      if (raw?.reusedExisting) notes.push('원문에 이미 이 언어로 쓴 부분이 있어 그대로 보여 드리고, 같은 내용의 다른 언어 부분은 뺐습니다. / Showing the part already in this language; other-language versions of it were left out.');
+      if (context.length) notes.push(`스레드 앞 메시지 ${context.length}개를 참고했습니다. / Used ${context.length} earlier thread message(s).`);
+      const note = notes.length ? notes.join('\n') : null;
       const out = { status: 'done', result, note };
       keep(key, out);
       return out;

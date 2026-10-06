@@ -77,3 +77,16 @@ test('한국어로 받을 결과가 다른 언어 글자로만 오면 다시 시
   const bad = createOpenAITranslator({ apiKey: 'k', model: 'm', fetchImpl: async () => ok('Xin chào') });
   await assert.rejects(bad({ text: 'Hello', targetCode: 'ko', context: [] }), TranslationError);
 });
+
+test('다국어 원문에서 내 언어 부분을 그대로 옮겼다고 하면 그 표시를 함께 돌려준다', async () => {
+  const translate = createOpenAITranslator({
+    apiKey: 'k', model: 'm',
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ translation: '[공지] 점검 안내', reused_existing: true }) }] }] }),
+    }),
+  });
+  assert.deepEqual(await translate({ text: '[공지] 점검 안내\n\n[Notice] Maintenance', targetCode: 'ko' }), { translation: '[공지] 점검 안내', reusedExisting: true });
+  const body = JSON.parse((await (async () => { let b; await createOpenAITranslator({ apiKey: 'k', model: 'm', fetchImpl: async (u, i) => { b = i.body; return ok('Hi'); } })({ text: '안녕', targetCode: 'en' }); return b; })()));
+  assert.deepEqual(body.text.format.schema.required, ['translation', 'reused_existing']);
+});

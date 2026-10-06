@@ -87,3 +87,26 @@ test('원문이 이미 받을 언어인지 글자 체계로 알아본다(한국�
   assert.equal(isWrongScript('[공지] BLB 시스템 이전 안내', 'ko'), false);
   assert.equal(isWrongScript('Hello', 'vi'), false);
 });
+
+test('다국어 공지는 내 언어가 절반 넘어도 「이미 내 언어」로 보지 않는다(같은 내용 반복 방지는 모델이 처리)', async () => {
+  const { isAlreadyIn, hasForeignParagraph } = await import('../src/core.mjs');
+  const multi = '[공지] 10/7(수) 시스템 점검 안내입니다. 점검 중에는 입력이 되지 않습니다.\n\n[Notice] System maintenance on Wed 10/7. Input is unavailable during maintenance.';
+  assert.equal(hasForeignParagraph(multi, 'ko'), true);
+  assert.equal(isAlreadyIn(multi, 'ko'), false);
+  const thMulti = '[공지] 시스템 점검 안내입니다. 점검 중에는 입력이 되지 않습니다.\nประกาศ ปิดปรับปรุงระบบวันพุธ ระหว่างนี้ไม่สามารถป้อนข้อมูลได้';
+  assert.equal(hasForeignParagraph(thMulti, 'th'), true);
+  // 짧은 영문 줄(시간대 표기·제품명)은 섞인 글로 보지 않는다 — 기존 한국어 공지는 그대로 「이미 한국어」.
+  const notice = '[공지] 10/5(월) BLB 시스템 이전 및 점검 안내\n- 14:30 (TH/VN 12:30, MY 13:30): 기존 시스템 입력 중지\n접속 주소: <https://blbsaas.com|blbsaas.com>';
+  assert.equal(hasForeignParagraph(notice, 'ko'), false);
+  assert.equal(isAlreadyIn(notice, 'ko'), true);
+  // 라틴 문자 언어는 글자로 판단하지 않는다.
+  assert.equal(hasForeignParagraph(multi, 'en'), false);
+});
+
+test('프롬프트: 원문에 이미 받을 언어 부분이 있으면 그대로 옮기고 같은 내용의 다른 언어판은 내지 않도록 지시한다', async () => {
+  const { buildTranslationPrompt } = await import('../src/core.mjs');
+  const { system } = buildTranslationPrompt({ text: 'a', targetCode: 'th' });
+  assert.match(system, /already written in Thai, copy that part exactly as written/);
+  assert.match(system, /do not output any other-language version of that same content/);
+  assert.match(system, /reused_existing/);
+});

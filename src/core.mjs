@@ -28,10 +28,24 @@ export function scriptShare(text, code) {
 
 // 원문이 이미 받을 언어인가. 같은 언어로 「번역」시키면 모델이 엉뚱한 언어를 내놓은 적이 있다(2026-10-05, 한국어 공지→베트남어).
 // 간체·번체는 글자로 구분이 안 되고 서로 바꿔 줘야 하므로 제외한다.
+// 다른 언어 문단이 섞여 있으면(다국어 공지 등) 원문 전체를 그대로 보이면 같은 내용이 반복되므로 false — 모델이 내 언어 문단만 남긴다(대표 요청 2026-10-06).
 export function isAlreadyIn(text, code) {
   if (code === 'zh-Hans' || code === 'zh-Hant') return false;
   const share = scriptShare(text, code);
-  return share !== null && share >= 0.5;
+  return share !== null && share >= 0.5 && !hasForeignParagraph(text, code);
+}
+
+// 받을 언어 글자가 거의 없는(20% 미만) 문단·줄이 하나라도 있으면 다른 언어가 섞인 글로 본다.
+// 짧은 줄(글자 15자 미만: 「TH/VN 12:30」, 제품명 등)은 판단에서 뺀다.
+const MIN_PARAGRAPH_LETTERS = 15;
+export function hasForeignParagraph(text, code) {
+  if (!SCRIPTS[code]) return false;
+  return String(text ?? '').split(/\n+/).some((line) => {
+    const plain = line.replace(/<[^>]*>|https?:\/\/\S+|:[a-z0-9_+-]+:/gi, '');
+    if ((plain.match(/\p{L}/gu) ?? []).length < MIN_PARAGRAPH_LETTERS) return false;
+    const share = scriptShare(line, code);
+    return share !== null && share < 0.2;
+  });
 }
 
 // 번역 결과에 받을 언어의 글자가 거의 없으면 잘못된 출력으로 본다.
@@ -90,6 +104,8 @@ export function buildTranslationPrompt({ text, targetCode, context = [] }) {
     '- Keep Slack tokens unchanged: <@U…>, <#C…>, <!here>, <https://…|label> (you may translate the label), :emoji:, `code` and ``` blocks.',
     '- Keep line breaks, lists, numbers, dates, amounts, product names and URLs as they are.',
     `- If the message is already in ${lang.promptName}, return it unchanged.`,
+    // 다국어 공지(같은 내용을 한국어·영어·태국어 등으로 이어 쓴 글)를 통째로 번역하면 같은 내용이 언어 수만큼 반복된다(대표 요청 2026-10-06).
+    `- The message may repeat the same content in several languages (e.g. a notice written in Korean, then English, then Thai). If a part is already written in ${lang.promptName}, copy that part exactly as written (do not rephrase it), and do not output any other-language version of that same content. Translate only content that has no ${lang.promptName} version in the message. Keep the original order. Set reused_existing to true when you copied any part that was already in ${lang.promptName} and dropped other-language versions of it; otherwise false.`,
     '- The message may contain typos or fast-typing slips. Translate the intended meaning, never the typo.',
     '- Do not summarize, explain, censor, or add information. Use a natural, accurate business register.',
     // 한국어 채팅은 주어·목적어를 자주 뺀다. 직역하면 영어가 수동태·명사구로 어색해진다(2026-09-29 실측).

@@ -588,3 +588,15 @@ test('원문이 이미 내 언어면 번역 API 를 부르지 않고 원문을 �
   assert.match(text(eph), /BLB 시스템 이전 안내/);
   assert.match(text(eph), /already in this language/);
 });
+
+test('다국어 공지: 모델이 내 언어 부분을 그대로 옮겼으면 그 부분만 보이고 안내 문구를 붙인다', async () => {
+  const { app, prefs } = setup({ translate: async () => ({ translation: '[공지] 수요일 점검', reusedExisting: true }) });
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  const multi = '[공지] 수요일 시스템 점검 안내입니다. 점검 중에는 입력이 되지 않습니다.\n\n[Notice] System maintenance on Wednesday. Input is unavailable.';
+  await shortcut(app, client, shortcutBody({ ts: '8.0', text: multi }));
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.match(text(eph), /\[공지\] 수요일 점검/);
+  assert.doesNotMatch(text(eph), /System maintenance/);
+  assert.match(text(eph), /other-language versions of it were left out/);
+});

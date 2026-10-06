@@ -75,8 +75,8 @@ export function createOpenAITranslator({
           strict: true,
           schema: {
             type: 'object',
-            properties: { translation: { type: 'string' } },
-            required: ['translation'],
+            properties: { translation: { type: 'string' }, reused_existing: { type: 'boolean' } },
+            required: ['translation', 'reused_existing'],
             additionalProperties: false,
           },
         },
@@ -86,12 +86,16 @@ export function createOpenAITranslator({
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const data = await request(body);
       let out;
+      let reused = false;
       try {
-        out = String(JSON.parse(extractOutputText(data)).translation ?? '').trim();
+        const parsed = JSON.parse(extractOutputText(data));
+        out = String(parsed.translation ?? '').trim();
+        reused = parsed.reused_existing === true;
       } catch {
         out = '';
       }
-      if (!isSuspiciousTranslation(text, out) && !isWrongScript(out, targetCode)) return out;
+      // 다국어 원문에서 내 언어 문단을 그대로 옮긴 경우는 결과 아래에 알린다(handlers). 그 외 호출부는 문자열처럼 쓴다.
+      if (!isSuspiciousTranslation(text, out) && !isWrongScript(out, targetCode)) return reused ? { translation: out, reusedExisting: true } : out;
     }
     throw new TranslationError('rejected output');
   };
