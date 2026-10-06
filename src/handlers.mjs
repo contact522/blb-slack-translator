@@ -158,17 +158,23 @@ export function registerHandlers(app, {
   }
 
   // 대화 안에 「나에게만 표시」로 보낸다. 봇이 없는 대화방(DM 등)이면 response_url 로 보낸다.
+  // 채널의 최상위 글(댓글이 아닌 글)은 채널 본문과 그 글의 댓글 창 두 곳에 보낸다(대표 요청 2026-10-06:
+  // 댓글 창만 쓰면 채널을 보던 사람은 결과가 온 줄 모른다). 댓글 번역과 DM 은 지금처럼 댓글 창 한 곳.
   async function deliver(client, entry, userId, message) {
+    const places = entry.topLevel && !isDm(entry) ? [null, entry.threadTs] : [entry.threadTs];
+    for (const threadTs of places) await deliverTo(client, entry, userId, message, threadTs ?? null);
+  }
+
+  async function deliverTo(client, entry, userId, message, threadTs) {
     try {
       await client.chat.postEphemeral({
         channel: entry.channel,
         user: userId,
-        // 원글이든 댓글이든 그 글의 댓글 창 안에 보인다.
-        thread_ts: entry.threadTs ?? undefined,
+        thread_ts: threadTs ?? undefined,
         ...message,
       });
       // 원인 추적용 한 줄(본문 없음): 어느 대화방·댓글 창에, 봇과 본인 토큰 중 무엇으로 넣었는지.
-      trace(`[전달] ${entry.channel} thread=${entry.threadTs ?? '-'} via=${byUser.has(client) ? 'token' : 'bot'}`);
+      trace(`[전달] ${entry.channel} thread=${threadTs ?? '-'} via=${byUser.has(client) ? 'token' : 'bot'}`);
       return;
     } catch (err) {
       const code = err?.data?.error ?? err.message;
@@ -179,7 +185,7 @@ export function registerHandlers(app, {
       logger.warn(`봇으로 못 보내 response_url 로 전달: ${code}`);
     }
     try {
-      await respond(entry.responseUrl, { response_type: 'ephemeral', thread_ts: entry.threadTs ?? undefined, ...message });
+      await respond(entry.responseUrl, { response_type: 'ephemeral', thread_ts: threadTs ?? undefined, ...message });
     } catch (err) {
       logger.warn(`결과 전달 실패: ${err.message}`);
     }
@@ -282,6 +288,8 @@ export function registerHandlers(app, {
       ts: message.ts,
       // 결과는 항상 그 글의 댓글 창 안에 둔다(대표 요청). 댓글이 없는 글도 자기 ts 를 스레드로 쓴다.
       threadTs: message.thread_ts ?? message.ts ?? null,
+      // 채널 최상위 글: thread_ts 가 없거나, 댓글이 달린 원글이라 thread_ts 가 자기 ts 인 경우.
+      topLevel: !message.thread_ts || message.thread_ts === message.ts,
       text: full.slice(0, MAX_SOURCE_CHARS),
       truncated: full.length > MAX_SOURCE_CHARS,
       responseUrl: responseUrl ?? null,

@@ -119,33 +119,36 @@ test('저장된 언어가 있으면 모달 없이 바로 번역하고, 스레드
   assert.match(text(eph), /1 earlier thread message/);
 });
 
-test('댓글이 달린 원글을 번역하면 결과가 그 댓글 창 안에 보인다', async () => {
+const places = (client) => client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1].thread_ts ?? null);
+
+test('댓글이 달린 원글(채널 최상위 글)을 번역하면 결과가 채널과 그 댓글 창 두 곳에 보인다', async () => {
   const { app, prefs } = setup();
   prefs.set('U1', 'ko');
   const client = fakeClient({ replies: [] });
   await shortcut(app, client, shortcutBody({ ts: '1.0', thread_ts: '1.0', text: 'Daily report' }));
-  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
-  assert.equal(eph.thread_ts, '1.0');
+  assert.deepEqual(places(client), [null, '1.0']);
 });
 
-test('thread_ts 없이 와도 댓글 수가 있으면 댓글 창 안에 보인다', async () => {
+test('thread_ts 없이 와도 댓글 수가 있으면 채널과 댓글 창 안에 보인다', async () => {
   const { app, prefs } = setup();
   prefs.set('U1', 'ko');
   const client = fakeClient({ replies: [] });
   await shortcut(app, client, shortcutBody({ ts: '1.0', reply_count: 2, text: 'Notice' }));
-  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
-  assert.equal(eph.thread_ts, '1.0');
+  assert.deepEqual(places(client), [null, '1.0']);
 });
 
-test('봇이 없는 대화방(DM)이면 response_url 로 나에게만 보낸다', async () => {
+test('봇이 없는 대화방이면 response_url 로 나에게만 보낸다(최상위 글은 채널·댓글 창 두 곳)', async () => {
   const { app, prefs, responded } = setup();
   prefs.set('U1', 'en');
   const client = fakeClient({ ephemeralError: 'channel_not_found' });
   await shortcut(app, client);
-  assert.equal(responded.length, 1);
-  assert.equal(responded[0].url, 'https://resp/1');
-  assert.equal(responded[0].payload.response_type, 'ephemeral');
-  assert.match(text(responded[0].payload), /번역-en/);
+  assert.equal(responded.length, 2);
+  assert.deepEqual(responded.map((r) => r.payload.thread_ts ?? null), [null, '4.0']);
+  for (const r of responded) {
+    assert.equal(r.url, 'https://resp/1');
+    assert.equal(r.payload.response_type, 'ephemeral');
+    assert.match(text(r.payload), /번역-en/);
+  }
 });
 
 test('다른 언어로 보기는 결과를 그 자리에서 바꾸고, 기본 언어는 그대로 둔다', async () => {
@@ -318,12 +321,12 @@ test('같은 사람이 같은 글을 다시 누르면 결과를 또 보내지 �
   await shortcut(app, client, body);
   assert.equal(count, 1);
   const results = client.calls.filter((c) => c[0] === 'ephemeral');
-  assert.equal(results.length, 1);
+  assert.equal(results.length, 2); // 최상위 글: 채널 + 댓글 창, 두 번째 누름은 보내지 않음
   assert.match(text(results[0][1]), /번역-ko/);
   // 다른 사람은 자기 결과를 받는다(번역은 저장된 것을 쓴다).
   prefs.set('U2', 'ko');
   await shortcut(app, client, { ...body, user: { id: 'U2' } });
-  assert.equal(client.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(client.calls.filter((c) => c[0] === 'ephemeral').length, 4);
   assert.equal(count, 1);
   // 다른 언어나 고친 글은 새로 번역한다.
   prefs.set('U1', 'th');
@@ -345,24 +348,88 @@ test('같은 사람·같은 글 🌐 는 10초 안에만 막고, 그 뒤 재요�
   });
   const sent = () => client.calls.filter((c) => c[0] === 'ephemeral').length;
   await fire('Ev1');
-  assert.equal(sent(), 1);
+  assert.equal(sent(), 2); // 최상위 글: 채널 + 댓글 창
   t += 5_000;
   await fire('Ev2'); // 10초 안 → 중복생략
-  assert.equal(sent(), 1);
+  assert.equal(sent(), 2);
   t += 6_000;
   await fire('Ev3'); // 10초 지남 → 저장된 번역 전달
-  assert.equal(sent(), 2);
-  assert.match(text(client.calls.filter((c) => c[0] === 'ephemeral')[1][1]), /번역-th/);
+  assert.equal(sent(), 4);
+  assert.match(text(client.calls.filter((c) => c[0] === 'ephemeral')[3][1]), /번역-th/);
   assert.equal(count, 1);
 });
 
-test('댓글이 없는 글도 결과는 그 글의 댓글 창 안에 둔다', async () => {
+test('댓글이 없는 채널 최상위 글은 채널에 나에게만 보이고, 그 글의 댓글 창에도 같이 둔다', async () => {
   const { app, prefs } = setup();
   prefs.set('U1', 'ko');
   const client = fakeClient();
   await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'No replies yet' }));
-  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
-  assert.equal(eph.thread_ts, '9.0');
+  assert.deepEqual(places(client), [null, '9.0']);
+  const [a, b] = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
+  assert.deepEqual(a.blocks, b.blocks);
+});
+
+test('스레드 안 댓글을 번역하면 결과는 그 스레드 한 곳에만 보낸다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient({ replies: [{ ts: '9.0', text: 'Root' }, { ts: '9.5', thread_ts: '9.0', text: 'Reply' }] });
+  await shortcut(app, client, shortcutBody({ ts: '9.5', thread_ts: '9.0', text: 'Reply' }));
+  assert.deepEqual(places(client), ['9.0']);
+});
+
+test('🌐 로 채널 최상위 글·스레드 댓글을 번역해도 같은 규칙으로 보낸다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U2', 'ko');
+  const top = fakeClient({ history: [{ ts: '5.0', text: 'Top' }] });
+  const fire = (client, ts, eventId) => app.handlers['event:reaction_added']({
+    body: { team_id: 'T1', event_id: eventId },
+    event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C9', ts } },
+    client,
+  });
+  await fire(top, '5.0', 'EvT');
+  assert.deepEqual(places(top), [null, '5.0']);
+  const reply = fakeClient({ history: [], replies: [{ ts: '5.5', thread_ts: '5.0', text: 'Reply' }] });
+  await fire(reply, '5.5', 'EvR');
+  assert.deepEqual(places(reply), ['5.0']);
+});
+
+test('채널에 보낸 결과와 댓글 창에 보낸 결과 모두 「다른 언어로 보기」「기본 언어」 버튼이 동작한다', async () => {
+  const { app, prefs, responded } = setup();
+  prefs.set('U1', 'th');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'Hello' }));
+  const sentMsgs = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
+  assert.equal(sentMsgs.length, 2);
+  for (const [i, eph] of sentMsgs.entries()) {
+    const actions = eph.blocks.find((b) => b.type === 'actions');
+    const url = `https://resp/place${i}`;
+    await app.handlers[`action:${ACTION_RETRANSLATE}`]({
+      ack: async () => {},
+      body: { team: { id: 'T1' }, user: { id: 'U1' }, response_url: url },
+      action: { block_id: actions.block_id, selected_option: { value: 'vi' } },
+      client,
+    });
+    assert.equal(responded.at(-1).url, url);
+    assert.equal(responded.at(-1).payload.replace_original, true);
+    assert.match(text(responded.at(-1).payload), /번역-vi/);
+    const defBtn = actions.elements.find((e) => e.action_id === ACTION_CHANGE_DEFAULT);
+    await app.handlers[`action:${ACTION_CHANGE_DEFAULT}`]({
+      ack: async () => {},
+      body: { team: { id: 'T1' }, user: { id: 'U1' }, trigger_id: 't', response_url: url },
+      action: defBtn,
+      client,
+    });
+    const view = client.calls.filter((c) => c[0] === 'open').at(-1)[1].view;
+    await app.handlers[`view:${PREF_CALLBACK_ID}`]({
+      ack: async () => {},
+      body: { team: { id: 'T1' }, user: { id: 'U1' } },
+      view: { ...view, state: { values: { lang: { lang: { selected_option: { value: 'en' } } } } } },
+      client,
+    });
+    assert.equal(responded.at(-1).url, url);
+    assert.match(text(responded.at(-1).payload), /번역-en/);
+    prefs.set('U1', 'th');
+  }
 });
 
 test('DM 에서 ⋯→번역은 맨 아래 메시지가 아니라 작은 창에 보여 준다', async () => {
@@ -506,7 +573,7 @@ test('🌐 는 누른 사람 이름으로만: 🌐 로 요청하면 번역기가
     event: { reaction: 'globe_with_meridians', user: 'U2', item: { type: 'message', channel: 'C1', ts: '3.0' } },
     client: botClient,
   });
-  assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral').length, 2);
+  assert.equal(botClient.calls.filter((c) => c[0] === 'ephemeral').length, 4); // 최상위 글 2개 × (채널 + 댓글 창)
   assert.equal(botClient.calls.filter((c) => c[0] === 'react').length, 0);
 });
 
