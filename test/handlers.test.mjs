@@ -366,7 +366,24 @@ test('댓글이 없는 채널 최상위 글은 채널에 나에게만 보이고,
   await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'No replies yet' }));
   assert.deepEqual(places(client), [null, '9.0']);
   const [a, b] = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
-  assert.deepEqual(a.blocks, b.blocks);
+  // 채널 쪽은 맨 아래에 붙으므로 원문 첫 줄을 위에 붙이고, 댓글 창 쪽은 그대로(원글 밑이라 필요 없음).
+  assert.match(a.blocks[0].elements[0].text, /원문 \/ Original: No replies yet/);
+  assert.deepEqual(a.blocks.slice(1).map((x) => x.type), b.blocks.map((x) => x.type));
+  assert.doesNotMatch(text(b), /Original:/);
+});
+
+test('채널 쪽 결과 머리줄: 원문 첫 줄(긴 글은 잘라서)과 원문 보기 링크', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  client.chat.getPermalink = async () => ({ permalink: 'https://x.slack.com/archives/C1/p9' });
+  const long = `[Notice] ${'very long title '.repeat(10)}\nsecond line`;
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: long }));
+  const head = client.calls.filter((c) => c[0] === 'ephemeral')[0][1].blocks[0].elements[0].text;
+  assert.match(head, /Original: \[Notice\] very long title/);
+  assert.match(head, /…/);
+  assert.doesNotMatch(head, /second line/);
+  assert.match(head, /<https:\/\/x\.slack\.com\/archives\/C1\/p9\|원문 보기 \/ Open>/);
 });
 
 test('스레드 안 댓글을 번역하면 결과는 그 스레드 한 곳에만 보낸다', async () => {
@@ -412,6 +429,8 @@ test('채널에 보낸 결과와 댓글 창에 보낸 결과 모두 「다른 �
     assert.equal(responded.at(-1).url, url);
     assert.equal(responded.at(-1).payload.replace_original, true);
     assert.match(text(responded.at(-1).payload), /번역-vi/);
+    // 채널 쪽(i=0)은 바꾼 결과에도 원문 머리줄이 남고, 댓글 창 쪽(i=1)은 없다.
+    assert.equal(/Original:/.test(text(responded.at(-1).payload)), i === 0);
     const defBtn = actions.elements.find((e) => e.action_id === ACTION_CHANGE_DEFAULT);
     await app.handlers[`action:${ACTION_CHANGE_DEFAULT}`]({
       ack: async () => {},
@@ -428,6 +447,7 @@ test('채널에 보낸 결과와 댓글 창에 보낸 결과 모두 「다른 �
     });
     assert.equal(responded.at(-1).url, url);
     assert.match(text(responded.at(-1).payload), /번역-en/);
+    assert.equal(/Original:/.test(text(responded.at(-1).payload)), i === 0);
     prefs.set('U1', 'th');
   }
 });

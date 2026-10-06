@@ -21,6 +21,19 @@ import {
 } from './views.mjs';
 
 export const SHORTCUT_ID = 'translate_message';
+const CHANNEL_MARK = '~c'; // 채널 본문에 보낸 결과 표시(원문 기록 id 는 16진수라 겹치지 않는다)
+const FIRST_LINE_MAX = 60;
+
+// 원문 첫 줄을 짧게. 링크는 글자만 남기고, 잘린 자리에 Slack 표기(<…>)가 반쯤 남지 않게 한다.
+export function firstLine(text) {
+  const line = String(text ?? '').split('\n').find((l) => l.trim()) ?? '';
+  const plain = line.replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2').replace(/<(https?:[^>]+)>/g, '$1').trim();
+  if (plain.length <= FIRST_LINE_MAX) return plain;
+  return `${plain.slice(0, FIRST_LINE_MAX).replace(/<[^>]*$/, '').trimEnd()}…`;
+}
+const splitMark = (raw) => (raw?.endsWith(CHANNEL_MARK)
+  ? { id: raw.slice(0, -CHANNEL_MARK.length), inChannel: true }
+  : { id: raw, inChannel: false });
 export const MAX_SOURCE_CHARS = 4000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 2000;
@@ -166,7 +179,36 @@ export function registerHandlers(app, {
   // 댓글 창만 쓰면 채널을 보던 사람은 결과가 온 줄 모른다). 댓글 번역과 DM 은 지금처럼 댓글 창 한 곳.
   async function deliver(client, entry, userId, message) {
     const places = entry.topLevel && !isDm(entry) ? [null, entry.threadTs] : [entry.threadTs];
-    for (const threadTs of places) await deliverTo(client, entry, userId, message, threadTs ?? null);
+    for (const threadTs of places) {
+      const msg = threadTs ? message : await channelCopy(client, entry, message);
+      await deliverTo(client, entry, userId, msg, threadTs ?? null);
+    }
+  }
+
+  // 채널 본문에 보내는 결과는 Slack 구조상 원글 밑이 아니라 채널 맨 아래에 붙는다(댓글 창만 글 밑에 붙일 수 있다).
+  // 글이 여러 개면 어느 글의 번역인지 모르므로, 원문 첫 줄과 「원문 보기」 링크를 위에 붙인다(대표 요청 2026-10-06).
+  // 버튼 줄 block_id·버튼 값 끝에 CHANNEL_MARK 를 달아, 언어를 바꿔 결과를 교체할 때도 이 머리줄을 다시 붙인다.
+  async function channelCopy(client, entry, message) {
+    if (entry.link === undefined) {
+      try {
+        entry.link = (await client.chat.getPermalink({ channel: entry.channel, message_ts: entry.ts }))?.permalink ?? null;
+      } catch {
+        entry.link = null;
+      }
+    }
+    const head = {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `📝 원문 / Original: ${firstLine(entry.text)}${entry.link ? ` · <${entry.link}|원문 보기 / Open>` : ''}` }],
+    };
+    const blocks = (message.blocks ?? []).map((b) => {
+      if (b.type !== 'actions' || !b.block_id?.startsWith(RESULT_BLOCK_PREFIX)) return b;
+      return {
+        ...b,
+        block_id: `${b.block_id}${CHANNEL_MARK}`,
+        elements: b.elements.map((e) => (e.action_id === ACTION_CHANGE_DEFAULT ? { ...e, value: `${e.value}${CHANNEL_MARK}` } : e)),
+      };
+    });
+    return { ...message, blocks: [head, ...blocks] };
   }
 
   async function deliverTo(client, entry, userId, message, threadTs) {
@@ -195,7 +237,7 @@ export function registerHandlers(app, {
     }
   }
 
-  async function run(client, { id, entry, userId, language, replaceUrl, viewId, fromReaction = false }) {
+  async function run(client, { id, entry, userId, language, replaceUrl, viewId, fromReaction = false, inChannel = false }) {
     // 누르자마자 원글에 🌐 를 붙이고(대표 요청) 번역은 그 뒤에 한다. 창·버튼으로 다시 번역할 때는 붙이지 않는다.
     if (!viewId && !replaceUrl && !fromReaction) await markTranslated(client, entry, userId);
     // 같은 사람이 같은 글을 같은 언어로 이미 받았으면 다시 보내지 않는다(대표 요청: 중복 금지).
@@ -230,7 +272,8 @@ export function registerHandlers(app, {
       await client.views.update({ view_id: viewId, view: resultView(message) })
         .catch((err) => logger.warn(`결과 창 갱신 실패: ${err?.data?.error ?? err.message}`));
     } else if (replaceUrl) {
-      await respond(replaceUrl, { replace_original: true, response_type: 'ephemeral', ...message })
+      const msg = inChannel ? await channelCopy(client, entry, message) : message;
+      await respond(replaceUrl, { replace_original: true, response_type: 'ephemeral', ...msg })
         .catch((err) => logger.warn(`결과 교체 실패: ${err.message}`));
     } else {
       await deliver(client, entry, userId, message);
@@ -444,13 +487,13 @@ export function registerHandlers(app, {
   app.action(ACTION_RETRANSLATE, async ({ ack, body, action, client }) => {
     await ack();
     if (!sameTeam(body?.team?.id)) return;
-    const id = action.block_id.slice(RESULT_BLOCK_PREFIX.length);
+    const { id, inChannel } = splitMark(action.block_id.slice(RESULT_BLOCK_PREFIX.length));
     const entry = recall(id);
     if (!entry) {
       await respond(body.response_url, { replace_original: true, response_type: 'ephemeral', ...expiredMessage() }).catch(() => {});
       return;
     }
-    await run(client, { id, entry, userId: body.user.id, language: action.selected_option.value, replaceUrl: body.response_url });
+    await run(client, { id, entry, userId: body.user.id, language: action.selected_option.value, replaceUrl: body.response_url, inChannel });
   });
 
   app.action(ACTION_CHANGE_DEFAULT, async ({ ack, body, action, client }) => {
@@ -459,7 +502,7 @@ export function registerHandlers(app, {
     await client.views.open({
       trigger_id: body.trigger_id,
       view: prefView({
-        metadata: JSON.stringify({ id: action.value, replaceUrl: body.response_url ?? null }),
+        metadata: JSON.stringify({ ...splitMark(action.value), replaceUrl: body.response_url ?? null }),
         current: prefs.get(body.user.id),
       }),
     });
@@ -472,7 +515,7 @@ export function registerHandlers(app, {
       return;
     }
     prefs.set(body.user.id, language);
-    const { id, replaceUrl } = JSON.parse(view.private_metadata || '{}');
+    const { id, replaceUrl, inChannel = false } = JSON.parse(view.private_metadata || '{}');
     const entry = id ? recall(id) : null;
     // DM 에서 처음 언어를 고른 경우: 언어 창을 「번역 중」 창으로 바꾸고 결과를 그 안에 보여 준다.
     const sender = entry && !replaceUrl ? dmSender(entry, body.user.id) : null;
@@ -487,6 +530,6 @@ export function registerHandlers(app, {
       return;
     }
     await ack();
-    if (entry) await run(client, { id, entry, userId: body.user.id, language, replaceUrl });
+    if (entry) await run(client, { id, entry, userId: body.user.id, language, replaceUrl, inChannel });
   });
 }
