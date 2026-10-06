@@ -545,3 +545,15 @@ test('연결 안 한 사람이 ⋯→번역하면 원글에 번역기 이름의 
   assert.equal(client.calls.some((c) => c[0] === 'react'), false);
   assert.equal(client.calls.some((c) => c[0] === 'ephemeral'), true);
 });
+
+test('채널의 글 아래 결과에만 맨 위에 「원문 보기」 링크를 단다', async () => {
+  const { app, prefs } = setup();
+  prefs.set('U1', 'ko');
+  const client = fakeClient();
+  client.chat.getPermalink = async () => ({ permalink: 'https://x.slack.com/archives/C1/p9' });
+  await shortcut(app, client, shortcutBody({ ts: '9.0', text: 'Top post' }));
+  const [inThread, inChannel] = client.calls.filter((c) => c[0] === 'ephemeral').map((c) => c[1]);
+  assert.equal(text(inThread).includes('원문 보기'), false);
+  assert.match(JSON.stringify(inChannel.blocks[0]), /p9\|원문 보기/);
+  assert.match(text(inChannel), /번역-ko/);
+});

@@ -159,9 +159,21 @@ export function registerHandlers(app, {
 
   // 번역 결과: 댓글 창 안에 넣고, 원글(댓글이 아닌 글)이면 채널의 그 글 아래에도 넣는다(대표 요청).
   // 댓글을 번역한 경우는 댓글 창 안에만 둔다.
+  // 채널 쪽은 Slack 이 대화 맨 아래에 붙여 어느 글의 번역인지 헷갈리므로 맨 위에 「원문 보기」 링크를 단다(대표 요청).
   async function deliverResult(client, entry, userId, message) {
     await deliver(client, entry, userId, message);
-    if (!entry.isReply) await deliver(client, { ...entry, threadTs: null, responseUrl: null }, userId, message);
+    if (entry.isReply) return;
+    const link = await permalinkOf(client, entry);
+    const head = link ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `↑ <${link}|원문 보기 / Original>` }] }] : [];
+    await deliver(client, { ...entry, threadTs: null, responseUrl: null }, userId, { ...message, blocks: [...head, ...message.blocks] });
+  }
+
+  async function permalinkOf(client, entry) {
+    try {
+      return (await client.chat.getPermalink({ channel: entry.channel, message_ts: entry.ts }))?.permalink ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // 대화 안에 「나에게만 표시」로 보낸다. 봇이 없는 대화방(DM 등)이면 response_url 로 보낸다.
@@ -241,12 +253,7 @@ export function registerHandlers(app, {
     if (!saved) return;
     const key = `${userId}:${doneKey(entry, language)}`;
     if (saved.has(key)) return;
-    let link = null;
-    try {
-      link = (await client.chat.getPermalink({ channel: entry.channel, message_ts: entry.ts }))?.permalink ?? null;
-    } catch {
-      link = null;
-    }
+    const link = await permalinkOf(client, entry);
     const where = isDm(entry) ? 'DM' : `<#${entry.channel}>`;
     const head = { type: 'context', elements: [{ type: 'mrkdwn', text: `📌 저장본 · ${where}${link ? ` · <${link}|원문 보기 / Original>` : ''}` }] };
     try {
