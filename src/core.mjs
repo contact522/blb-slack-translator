@@ -118,6 +118,28 @@ export function buildTranslationPrompt({ text, targetCode, context = [] }) {
   return { system, user: blocks.join('\n\n') };
 }
 
+// 긴 글을 limit 자 이하 조각으로 나눈다. 문단(빈 줄) → 줄 → 띄어쓰기 순으로 끊을 곳을 찾고,
+// 끊을 곳이 없으면 그 자리에서 자른다. 조각을 그대로 이으면 원문과 같다(구분 문자는 앞 조각 끝에 남는다).
+// 쓰임: 번역 결과를 Slack 칸(3000자 한도) 여러 개로 나누기, 긴 원문을 나눠 번역하기 (2026-11-24 대표 요청: 긴 글이 잘림)
+export function splitText(text, limit) {
+  const parts = [];
+  let rest = text;
+  while (rest.length > limit) {
+    const head = rest.slice(0, limit);
+    let cut = -1;
+    for (const sep of ['\n\n', '\n', ' ']) {
+      const at = head.lastIndexOf(sep);
+      // 너무 앞에서 끊으면 조각이 잘게 늘어나므로 절반 이후의 구분만 쓴다.
+      if (at >= limit / 2) { cut = at + sep.length; break; }
+    }
+    if (cut < 0) cut = limit;
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
 // Slack 모달 private_metadata 는 3000자 제한이 있다. 원문을 잘라 맞추고 잘렸는지 표시한다.
 export const METADATA_LIMIT = 3000;
 

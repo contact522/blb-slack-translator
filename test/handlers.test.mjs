@@ -557,3 +557,41 @@ test('채널의 글 아래 결과에만 맨 위에 「원문 보기」 링크를
   assert.match(JSON.stringify(inChannel.blocks[0]), /p9\|원문 보기/);
   assert.match(text(inChannel), /번역-ko/);
 });
+
+test('긴 번역 결과는 2900자에서 자르지 않고 여러 칸에 모두 담는다', async () => {
+  const long = Array.from({ length: 40 }, (_, i) => `${i}번째 문단 ${'x'.repeat(200)}`).join('\n\n');
+  const { app, prefs } = setup({ translate: async () => long });
+  prefs.set('U1', 'en');
+  const client = fakeClient();
+  await shortcut(app, client);
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  const sections = eph.blocks.filter((b) => b.type === 'section');
+  assert.ok(sections.length > 1);
+  assert.ok(sections.every((b) => b.text.text.length <= 3000));
+  assert.equal(sections.map((b) => b.text.text).join('').replace(/\s/g, ''), long.replace(/\s/g, ''));
+  assert.doesNotMatch(text(eph), /…/);
+});
+
+test('긴 원문은 2000자 조각으로 나눠 번역하고 순서대로 잇는다. 4000자 넘는 글도 자르지 않는다', async () => {
+  const seen = [];
+  const { app, prefs } = setup({ translate: async (a) => { seen.push(a.text.length); return `[${a.text.slice(0, 2)}]`; } });
+  prefs.set('U1', 'en');
+  const source = ['가가', '나나', '다다', '라라'].map((h) => h + '한'.repeat(1500)).join('\n\n');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '4.0', text: source }));
+  assert.equal(seen.length, 4);
+  assert.ok(seen.every((n) => n <= 2000));
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.match(text(eph), /\[가가\]\\n\\n\[나나\]\\n\\n\[다다\]\\n\\n\[라라\]/);
+  assert.doesNotMatch(text(eph), /앞부분만/);
+});
+
+test('조각 하나라도 번역에 실패하면 일부만 보내지 않고 실패로 안내한다', async () => {
+  let n = 0;
+  const { app, prefs } = setup({ translate: async () => { n += 1; if (n === 2) throw new Error('x'); return 'ok'; } });
+  prefs.set('U1', 'en');
+  const client = fakeClient();
+  await shortcut(app, client, shortcutBody({ ts: '4.0', text: '한'.repeat(5000) }));
+  const eph = client.calls.find((c) => c[0] === 'ephemeral')[1];
+  assert.match(text(eph), /Translation failed/);
+});

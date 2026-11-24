@@ -6,7 +6,7 @@
 // - 🌐 반응: 봇이 들어가 있는 채널에서 같은 번역을 한다 (마우스 올림 아이콘 줄에서 한 번 클릭).
 // - 결과 아래 「다른 언어로 보기」는 이번만, 「기본 언어」는 저장값을 바꾼다.
 import crypto from 'node:crypto';
-import { extractMessageText, selectContext, findLanguage, isAlreadyIn } from './core.mjs';
+import { extractMessageText, selectContext, findLanguage, isAlreadyIn, splitText } from './core.mjs';
 import {
   resultMessage,
   expiredMessage,
@@ -21,7 +21,10 @@ import {
 } from './views.mjs';
 
 export const SHORTCUT_ID = 'translate_message';
-export const MAX_SOURCE_CHARS = 4000;
+// 원문 상한. 4000자에서 12000자로 올렸다(2026-11-24 대표 요청: 긴 글이 잘림).
+// 긴 원문은 CHUNK_CHARS 단위로 나눠 동시에 번역한다. 한 번에 보내면 응답이 길어져 30초 제한에 걸릴 수 있어서다.
+export const MAX_SOURCE_CHARS = 12000;
+export const CHUNK_CHARS = 2000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 2000;
 // 같은 메시지·같은 언어는 다시 번역하지 않고 저장된 결과를 보여 준다(비용 0, 즉시).
@@ -146,7 +149,11 @@ export function registerHandlers(app, {
     const { context, errorCode } = await loadContext(client, entry);
     if (errorCode) logger.info(`문맥 읽기 생략: ${errorCode}`);
     try {
-      const result = await translate({ text: entry.text, targetCode: language, context });
+      // 조각마다 따로 번역하고 원래 사이에 있던 줄바꿈을 되살려 잇는다(번역기는 앞뒤 공백을 지운다).
+      // 하나라도 실패하면 전체를 실패로 본다(일부만 번역된 글을 완성본처럼 보이지 않게).
+      const chunks = splitText(entry.text, CHUNK_CHARS);
+      const outs = await Promise.all(chunks.map((c) => translate({ text: c, targetCode: language, context })));
+      const result = outs.map((o, i) => (i < outs.length - 1 ? o + (chunks[i].match(/\s*$/)[0] || ' ') : o)).join('');
       const note = context.length ? `스레드 앞 메시지 ${context.length}개를 참고했습니다. / Used ${context.length} earlier thread message(s).` : null;
       const out = { status: 'done', result, note };
       keep(key, out);
