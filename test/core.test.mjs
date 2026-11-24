@@ -9,6 +9,7 @@ import {
   unpackMetadata,
   METADATA_LIMIT,
   createRateLimiter,
+  splitText,
 } from '../src/core.mjs';
 
 test('지원 언어는 6개이고 코드가 겹치지 않는다', () => {
@@ -96,4 +97,15 @@ test('본문의 파일 ID(캔버스 등)는 files 의 제목·링크로 바꾸�
   assert.equal(extractMessageText(message), '자료를 정리했습니다.\n<https://x.slack.com/docs/T1/F0C716UUJ3U|YOUNGWONHEE 자료 모음 (최신본)>\n확인 부탁드립니다');
   assert.equal(extractMessageText({ text: 'F0C716UUJ3U' }), 'F0C716UUJ3U');
   assert.equal(extractMessageText({ text: 'FAQ FINALIZED', files: message.files }), 'FAQ FINALIZED');
+});
+
+test('splitText: 한도 이하 조각으로 나누고, 이으면 원문과 같다. 문단·줄 경계에서 먼저 끊는다', () => {
+  const para = '가'.repeat(1500);
+  const text = `${para}\n\n${para}\n${para} ${'나'.repeat(4000)}`;
+  const parts = splitText(text, 2000);
+  assert.equal(parts.join(''), text);
+  assert.ok(parts.every((p) => p.length <= 2000));
+  assert.ok(parts[0].endsWith('\n\n'));
+  assert.deepEqual(splitText('짧은 글', 2000), ['짧은 글']);
+  assert.deepEqual(splitText('', 2000), []);
 });

@@ -1,5 +1,5 @@
 // Block Kit 화면. 번역 결과는 대화 안에 「나에게만 표시」 메시지로, 언어 설정은 작은 모달로 보인다.
-import { LANGUAGES, findLanguage } from './core.mjs';
+import { LANGUAGES, findLanguage, splitText } from './core.mjs';
 
 export const PREF_CALLBACK_ID = 'set_default_language';
 export const ACTION_RETRANSLATE = 'retranslate';
@@ -7,9 +7,18 @@ export const ACTION_CHANGE_DEFAULT = 'change_default';
 export const RESULT_BLOCK_PREFIX = 'r:'; // 결과 메시지의 버튼 줄 block_id = r:<원문 기록 id>
 const PREF_BLOCK = 'lang';
 const SECTION_LIMIT = 2900; // Slack section text 한도 3000자
+// 메시지 한 개의 블록 한도는 50개. 머리·안내·버튼 줄 몫을 빼고 본문 칸은 40개까지(약 11만 자).
+const MAX_SECTIONS = 40;
 
-function clip(text) {
-  return text.length > SECTION_LIMIT ? `${text.slice(0, SECTION_LIMIT)}…` : text;
+// 번역 결과를 3000자 칸 여러 개로 나눠 담는다. 예전에는 2900자에서 말없이 잘랐다(2026-11-24 대표 요청: 긴 글이 잘림).
+function resultSections(text) {
+  const parts = splitText(text, SECTION_LIMIT);
+  const shown = parts.slice(0, MAX_SECTIONS);
+  if (parts.length > MAX_SECTIONS) shown[shown.length - 1] += '…';
+  return {
+    blocks: shown.map((t) => ({ type: 'section', text: { type: 'mrkdwn', text: t } })),
+    cut: parts.length > MAX_SECTIONS,
+  };
 }
 
 function option(lang) {
@@ -19,18 +28,19 @@ function option(lang) {
 // 번역 결과 메시지. 아래에 「다른 언어로 보기」와 「기본 언어 바꾸기」를 붙인다.
 export function resultMessage({ id, language, result, status = 'done', note, truncated }) {
   const lang = findLanguage(language);
+  const body = status === 'error'
+    ? { blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `:warning: ${result}` } }], cut: false }
+    : resultSections(result);
   const blocks = [
     {
       type: 'context',
       elements: [{ type: 'mrkdwn', text: `:globe_with_meridians: *${lang?.label ?? language}* 번역 / Translation` }],
     },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: status === 'error' ? `:warning: ${result}` : clip(result) },
-    },
+    ...body.blocks,
   ];
   const notes = [];
-  if (truncated) notes.push('원문이 길어 앞부분만 번역했습니다. / Long message: only the first part was translated.');
+  if (body.cut) notes.push('번역 결과가 너무 길어 뒷부분은 표시하지 못했습니다. / The translation is too long to show in full.');
+  if (truncated) notes.push('원문이 1만 2천 자를 넘어 앞부분만 번역했습니다. / Long message: only the first 12,000 characters were translated.');
   if (note) notes.push(note);
   if (notes.length) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join('\n') }] });
   blocks.push({
